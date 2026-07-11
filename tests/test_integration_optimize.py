@@ -46,6 +46,28 @@ def test_optimize_minimal_epub(tmp_path: Path) -> None:
     assert second_opf.count("epub-optimizer.css") == 1
 
 
+def test_optimize_root_opf_anonymous_div_chapter(tmp_path: Path) -> None:
+    source = tmp_path / "root-book.epub"
+    _write_root_opf_div_chapter_epub(source)
+
+    result = optimize_epub(source, tmp_path / "out-root")
+
+    with zipfile.ZipFile(result.output_path) as archive:
+        names = archive.namelist()
+        opf = archive.read("content.opf").decode("utf-8")
+        chapter = archive.read("OEBPS/chapter001.xhtml").decode("utf-8")
+
+    assert "Styles/epub-optimizer.css" in names
+    assert "Styles/old.css" not in names
+    assert 'href="Styles/epub-optimizer.css"' in opf
+    assert 'href="../Styles/epub-optimizer.css"' in chapter
+    assert (
+        '<h1 class="eo-chapter">C<span>ITIES</span> &amp; M<span>EMORY</span> • 1</h1>'
+        in chapter
+    )
+    assert '<p class="eo-first">L<span>EAVING THERE AND</span> proceeding east.</p>' in chapter
+
+
 def _write_minimal_epub(path: Path) -> None:
     with zipfile.ZipFile(path, "w") as archive:
         archive.writestr(
@@ -104,6 +126,60 @@ def _write_minimal_epub(path: Path) -> None:
     <h1 class="chapter">Chapter One</h1>
     <p class="nonindent" style="margin: 2em;">First paragraph with <em>emphasis</em>.</p>
     <p class="indent"><span class="publisher">Second</span> paragraph.</p>
+  </body>
+</html>
+""",
+        )
+
+
+def _write_root_opf_div_chapter_epub(path: Path) -> None:
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr(
+            "mimetype",
+            "application/epub+zip",
+            compress_type=zipfile.ZIP_STORED,
+        )
+        archive.writestr(
+            "META-INF/container.xml",
+            """<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>
+""",
+        )
+        archive.writestr(
+            "content.opf",
+            """<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="id" version="3.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="id">urn:test-root</dc:identifier>
+    <dc:title>Root Test</dc:title>
+    <dc:language>en</dc:language>
+  </metadata>
+  <manifest>
+    <item id="chapter001" href="OEBPS/chapter001.xhtml" media-type="application/xhtml+xml"/>
+    <item id="old-css" href="Styles/old.css" media-type="text/css"/>
+  </manifest>
+  <spine>
+    <itemref idref="chapter001"/>
+  </spine>
+</package>
+""",
+        )
+        archive.writestr("Styles/old.css", "div { font-family: PublisherFont; }")
+        archive.writestr(
+            "OEBPS/chapter001.xhtml",
+            """<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <title>Root Test</title>
+    <link href="../Styles/old.css" rel="stylesheet" type="text/css"/>
+  </head>
+  <body>
+    <div>C<span>ITIES</span> &amp; M<span>EMORY</span> • 1</div>
+    <div>L<span>EAVING THERE AND</span> proceeding east.</div>
   </body>
 </html>
 """,

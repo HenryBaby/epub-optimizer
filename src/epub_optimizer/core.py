@@ -144,7 +144,7 @@ def optimize_epub(
             1 for item in items if item.attrib.get("media-type", "").lower().startswith("image/")
         )
 
-        canonical_css_package_href = _ensure_canonical_css(package_dir_path)
+        canonical_css_package_href = _ensure_canonical_css(work_dir, package_dir_path)
         canonical_item_href = _relative_from_package_dir(package_dir, canonical_css_package_href)
         stylesheets_replaced = _replace_removable_manifest_items(
             manifest,
@@ -168,7 +168,7 @@ def optimize_epub(
                 content_file,
                 content_package_path,
                 canonical_css_package_href,
-                _is_front_matter_item(item),
+                _document_role(item),
             ):
                 processed_docs += 1
 
@@ -234,11 +234,11 @@ def _manifest_items(manifest: etree._Element) -> list[etree._Element]:
     ]
 
 
-def _ensure_canonical_css(package_dir_path: Path) -> str:
+def _ensure_canonical_css(work_dir: Path, package_dir_path: Path) -> str:
     css_path = package_dir_path / CANONICAL_CSS_HREF
     css_path.parent.mkdir(parents=True, exist_ok=True)
     css_path.write_text(CANONICAL_CSS, encoding="utf-8")
-    return css_path.relative_to(package_dir_path.parent).as_posix()
+    return css_path.relative_to(work_dir).as_posix()
 
 
 def _relative_from_package_dir(package_dir: str, package_relative_path: str) -> str:
@@ -322,7 +322,7 @@ def _process_content_document(
     content_file: Path,
     content_package_path: str,
     canonical_css_package_href: str,
-    is_front_matter: bool,
+    document_role: str,
 ) -> bool:
     parser = etree.XMLParser(resolve_entities=False, no_network=True, recover=True)
     tree = etree.parse(str(content_file), parser)
@@ -338,7 +338,7 @@ def _process_content_document(
     _strip_publisher_presentation(root)
     _unwrap_font_elements(root)
     _normalize_inline_spans(root)
-    _classify_blocks(root, is_front_matter)
+    _classify_blocks(root, document_role)
     _strip_unclassified_classes(root)
     _write_xml(tree, content_file)
     return True
@@ -442,8 +442,9 @@ def _rename_element(element: etree._Element, local_name: str) -> None:
     element.tag = f"{{{namespace}}}{local_name}" if namespace else local_name
 
 
-def _classify_blocks(root: etree._Element, is_front_matter: bool) -> None:
+def _classify_blocks(root: etree._Element, document_role: str) -> None:
     after_boundary = True
+    is_front_matter = document_role == "front"
     for element in root.xpath("//*[local-name()='body']//*[self::*]"):
         local = etree.QName(element).localname.lower()
         source_classes = set(element.attrib.get("class", "").lower().split())
@@ -486,6 +487,27 @@ def _classify_blocks(root: etree._Element, is_front_matter: bool) -> None:
                 "eo-scene-break",
             }
             continue
+
+        if local == "div" and not source_classes and _is_direct_body_child(element):
+            role = _anonymous_div_role(element, after_boundary, document_role)
+            if role:
+                if role in {"eo-chapter", "eo-part", "eo-front", "eo-section"}:
+                    _rename_element(element, "h1")
+                    _replace_classes(element, role)
+                    after_boundary = True
+                else:
+                    _rename_element(element, "p")
+                    _replace_classes(element, role)
+                    after_boundary = role in {
+                        "eo-caption",
+                        "eo-centered",
+                        "eo-extract",
+                        "eo-footnote",
+                        "eo-image",
+                        "eo-poetry",
+                        "eo-scene-break",
+                    }
+                continue
 
         if local in {"div", "figure", "section"}:
             role = _container_role(source_classes)
@@ -577,12 +599,96 @@ def _contains_direct_image(element: etree._Element) -> bool:
     return any(etree.QName(child).localname.lower() == "img" for child in element)
 
 
+def _is_direct_body_child(element: etree._Element) -> bool:
+    parent = element.getparent()
+    return parent is not None and etree.QName(parent).localname.lower() == "body"
+
+
+def _anonymous_div_role(
+    element: etree._Element,
+    after_boundary: bool,
+    document_role: str,
+) -> str | None:
+    if _contains_direct_image(element):
+        return "eo-image"
+    if _is_scene_break(element):
+        return "eo-scene-break"
+    if _has_block_children(element):
+        return None
+
+    text = _normalized_text(element)
+    if not text:
+        return None
+    if document_role == "front":
+        if (
+            after_boundary
+            and _is_first_meaningful_body_child(element)
+            and _is_short_heading_text(text)
+        ):
+            return "eo-front"
+        return "eo-front-body"
+    if document_role == "part":
+        if (
+            after_boundary
+            and _is_first_meaningful_body_child(element)
+            and _is_short_heading_text(text)
+        ):
+            return "eo-part"
+        return "eo-first"
+    if after_boundary and _is_first_meaningful_body_child(element) and _is_short_heading_text(text):
+        return "eo-chapter"
+    return "eo-first" if after_boundary else "eo-body"
+
+
+def _has_block_children(element: etree._Element) -> bool:
+    block_names = {
+        "blockquote",
+        "div",
+        "figure",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "ol",
+        "p",
+        "section",
+        "table",
+        "ul",
+    }
+    return any(etree.QName(child).localname.lower() in block_names for child in element)
+
+
+def _is_first_meaningful_body_child(element: etree._Element) -> bool:
+    parent = element.getparent()
+    if parent is None:
+        return False
+    for child in parent:
+        if not isinstance(child.tag, str):
+            continue
+        if etree.QName(child).localname.lower() in {"script", "style"}:
+            continue
+        if _normalized_text(child) or _contains_direct_image(child):
+            return child is element
+    return False
+
+
+def _normalized_text(element: etree._Element) -> str:
+    return " ".join("".join(element.itertext()).split())
+
+
+def _is_short_heading_text(text: str) -> bool:
+    words = text.split()
+    return len(text) <= 120 and len(words) <= 14
+
+
 def _is_scene_break(element: etree._Element) -> bool:
-    text = " ".join("".join(element.itertext()).split())
+    text = _normalized_text(element)
     return text in {"*", "* * *", "***", "****", "*****"}
 
 
-def _is_front_matter_item(item: etree._Element) -> bool:
+def _document_role(item: etree._Element) -> str:
     values = " ".join(
         [
             item.attrib.get("id", ""),
@@ -590,7 +696,13 @@ def _is_front_matter_item(item: etree._Element) -> bool:
             item.attrib.get("properties", ""),
         ]
     ).lower()
-    return any(hint in values for hint in FRONT_MATTER_HINTS)
+    if any(hint in values for hint in FRONT_MATTER_HINTS):
+        return "front"
+    if "part" in values:
+        return "part"
+    if "chapter" in values or "/chap" in values or "/ch" in values:
+        return "chapter"
+    return "body"
 
 
 def _strip_unclassified_classes(root: etree._Element) -> None:
