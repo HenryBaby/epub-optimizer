@@ -10,6 +10,6 @@ COPY src ./src
 
 RUN pip install --no-cache-dir .
 
-EXPOSE 8000
+EXPOSE 4200
 
-CMD ["uvicorn", "epub_optimizer.web:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "epub_optimizer.web:app", "--host", "0.0.0.0", "--port", "4200"]
