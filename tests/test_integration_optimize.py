@@ -178,8 +178,8 @@ def _write_root_opf_div_chapter_epub(path: Path) -> None:
     <link href="../Styles/old.css" rel="stylesheet" type="text/css"/>
   </head>
   <body>
-    <div>C<span>ITIES</span> &amp; M<span>EMORY</span> • 1</div>
-    <div>L<span>EAVING THERE AND</span> proceeding east.</div>
+    <div class="calibre-heading">C<span>ITIES</span> &amp; M<span>EMORY</span> • 1</div>
+    <div class="calibre-body">L<span>EAVING THERE AND</span> proceeding east.</div>
   </body>
 </html>
 """,

@@ -488,8 +488,9 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
             }
             continue
 
-        if local == "div" and not source_classes and _is_direct_body_child(element):
-            role = _anonymous_div_role(element, after_boundary, document_role)
+        if local == "div" and _is_direct_body_child(element):
+            container_role = _container_role(source_classes)
+            role = container_role or _anonymous_div_role(element, after_boundary, document_role)
             if role:
                 if role in {"eo-chapter", "eo-part", "eo-front", "eo-section"}:
                     _rename_element(element, "h1")
