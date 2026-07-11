@@ -9,7 +9,10 @@
   <body>
     <main class="shell">
       <section class="panel">
-        <h1>EPUB Optimizer</h1>
+        <div class="title-row">
+          <h1>EPUB Optimizer</h1>
+          <span class="version">v{{ app_version }}</span>
+        </div>
         <form action="/optimize" method="post" enctype="multipart/form-data">
           <label for="file">EPUB file</label>
           <input id="file" name="file" type="file" accept=".epub,application/epub+zip" required>

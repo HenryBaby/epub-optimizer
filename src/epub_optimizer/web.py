@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from epub_optimizer import __version__
 from epub_optimizer.core import optimize_epub, optimized_filename
 from epub_optimizer.errors import EpubOptimizerError
 
@@ -28,6 +29,7 @@ def index(request: Request) -> HTMLResponse:
         request,
         "index.html",
         {
+            "app_version": __version__,
             "max_upload_mb": MAX_UPLOAD_MB,
             "result": None,
             "error": None,
@@ -69,6 +71,7 @@ async def optimize(request: Request, file: Annotated[UploadFile, File()]) -> HTM
         request,
         "index.html",
         {
+            "app_version": __version__,
             "max_upload_mb": MAX_UPLOAD_MB,
             "result": result,
             "download_name": download_token,
@@ -101,6 +104,7 @@ def _render_error(request: Request, message: str) -> HTMLResponse:
         request,
         "index.html",
         {
+            "app_version": __version__,
             "max_upload_mb": MAX_UPLOAD_MB,
             "result": None,
             "error": message,
