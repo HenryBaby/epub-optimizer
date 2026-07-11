@@ -23,6 +23,74 @@ XHTML_NS = "http://www.w3.org/1999/xhtml"
 DANGEROUS_URI_SCHEMES = {"javascript", "data", "vbscript", "file"}
 CANONICAL_CSS_ID = "epub-optimizer-css"
 CANONICAL_CSS_HREF = "Styles/epub-optimizer.css"
+REMOVABLE_MEDIA_TYPES = {
+    "application/font-woff",
+    "application/font-woff2",
+    "application/vnd.adobe-page-template+xml",
+    "application/vnd.ms-opentype",
+    "application/x-font-opentype",
+    "application/x-font-otf",
+    "application/x-font-ttf",
+    "application/x-font-truetype",
+    "application/x-font-woff",
+    "font/otf",
+    "font/sfnt",
+    "font/ttf",
+    "font/woff",
+    "font/woff2",
+}
+REMOVABLE_SUFFIXES = {".css", ".xpgt", ".otf", ".ttf", ".woff", ".woff2"}
+PRESENTATION_ATTRS = {
+    "align",
+    "alink",
+    "background",
+    "bgcolor",
+    "border",
+    "cellpadding",
+    "cellspacing",
+    "clear",
+    "color",
+    "face",
+    "height",
+    "hspace",
+    "link",
+    "marginheight",
+    "marginwidth",
+    "size",
+    "style",
+    "text",
+    "valign",
+    "vlink",
+    "vspace",
+    "width",
+}
+FRONT_MATTER_HINTS = {
+    "ack",
+    "acknowledg",
+    "afterword",
+    "appendix",
+    "ata",
+    "author",
+    "authorsnote",
+    "bibliography",
+    "colophon",
+    "contents",
+    "cop",
+    "copyright",
+    "ded",
+    "dedication",
+    "epigraph",
+    "foreword",
+    "glossary",
+    "intro",
+    "introduction",
+    "notes",
+    "preface",
+    "prologue",
+    "source",
+    "toc",
+    "title",
+}
 
 
 def optimize_epub(
@@ -64,11 +132,7 @@ def optimize_epub(
             raise InvalidEpubError("OPF package document is missing a manifest.")
 
         items = _manifest_items(manifest)
-        css_hrefs = [
-            item.attrib["href"]
-            for item in items
-            if item.attrib.get("media-type", "").lower() == "text/css" and item.attrib.get("href")
-        ]
+        removable_hrefs = _removable_manifest_hrefs(items)
         content_items = [
             item
             for item in items
@@ -82,10 +146,15 @@ def optimize_epub(
 
         canonical_css_package_href = _ensure_canonical_css(package_dir_path)
         canonical_item_href = _relative_from_package_dir(package_dir, canonical_css_package_href)
-        stylesheets_replaced = _replace_stylesheet_manifest_items(
-            manifest, css_hrefs, canonical_item_href
+        stylesheets_replaced = _replace_removable_manifest_items(
+            manifest,
+            removable_hrefs,
+            canonical_item_href,
         )
-        log.append(f"Replaced {stylesheets_replaced} stylesheet manifest item(s).")
+        removed_files = _delete_package_files(work_dir, package_dir, removable_hrefs)
+        log.append(f"Removed {stylesheets_replaced} old style/font manifest item(s).")
+        if removed_files:
+            log.append(f"Deleted {removed_files} old style/font file(s).")
 
         processed_docs = 0
         for item in content_items:
@@ -99,6 +168,7 @@ def optimize_epub(
                 content_file,
                 content_package_path,
                 canonical_css_package_href,
+                _is_front_matter_item(item),
             ):
                 processed_docs += 1
 
@@ -180,20 +250,65 @@ def _relative_from_package_dir(package_dir: str, package_relative_path: str) -> 
     return posixpath.relpath(package_relative_path, package_dir)
 
 
-def _replace_stylesheet_manifest_items(
+def _removable_manifest_hrefs(items: list[etree._Element]) -> list[str]:
+    hrefs: list[str] = []
+    for item in items:
+        href = item.attrib.get("href")
+        if not href:
+            continue
+        if item.attrib.get("id") == CANONICAL_CSS_ID or href == CANONICAL_CSS_HREF:
+            continue
+        media_type = item.attrib.get("media-type", "").lower()
+        suffix = PurePosixPath(href).suffix.lower()
+        if (
+            media_type == "text/css"
+            or media_type in REMOVABLE_MEDIA_TYPES
+            or suffix in REMOVABLE_SUFFIXES
+        ):
+            hrefs.append(href)
+    return hrefs
+
+
+def _replace_removable_manifest_items(
     manifest: etree._Element,
-    old_css_hrefs: list[str],
+    removable_hrefs: list[str],
     canonical_href: str,
 ) -> int:
     replaced = 0
+    canonical_exists = False
     for item in _manifest_items(manifest):
-        if item.attrib.get("media-type", "").lower() == "text/css":
+        href = item.attrib.get("href")
+        media_type = item.attrib.get("media-type", "").lower()
+        suffix = PurePosixPath(href or "").suffix.lower()
+        if item.attrib.get("id") == CANONICAL_CSS_ID or href == CANONICAL_CSS_HREF:
+            item.attrib["id"] = CANONICAL_CSS_ID
+            item.attrib["href"] = canonical_href
+            item.attrib["media-type"] = "text/css"
+            canonical_exists = True
+            continue
+        if (
+            media_type == "text/css"
+            or media_type in REMOVABLE_MEDIA_TYPES
+            or suffix in REMOVABLE_SUFFIXES
+        ):
             manifest.remove(item)
             replaced += 1
 
-    attrib = {"id": CANONICAL_CSS_ID, "href": canonical_href, "media-type": "text/css"}
-    manifest.append(etree.Element(f"{{{OPF_NS}}}item", attrib=attrib))
-    return max(replaced, len(old_css_hrefs))
+    if not canonical_exists:
+        attrib = {"id": CANONICAL_CSS_ID, "href": canonical_href, "media-type": "text/css"}
+        manifest.append(etree.Element(f"{{{OPF_NS}}}item", attrib=attrib))
+    return max(replaced, len(removable_hrefs))
+
+
+def _delete_package_files(work_dir: Path, package_dir: str, hrefs: list[str]) -> int:
+    deleted = 0
+    for href in hrefs:
+        package_path = _join_package_path(package_dir, href)
+        file_path = work_dir / Path(*PurePosixPath(package_path).parts)
+        if file_path.is_file():
+            file_path.unlink()
+            deleted += 1
+    return deleted
 
 
 def _join_package_path(package_dir: str, href: str) -> str:
@@ -207,6 +322,7 @@ def _process_content_document(
     content_file: Path,
     content_package_path: str,
     canonical_css_package_href: str,
+    is_front_matter: bool,
 ) -> bool:
     parser = etree.XMLParser(resolve_entities=False, no_network=True, recover=True)
     tree = etree.parse(str(content_file), parser)
@@ -219,7 +335,11 @@ def _process_content_document(
         _append_stylesheet_link(head, css_href)
 
     _sanitize_links(root)
-    _classify_blocks(root)
+    _strip_publisher_presentation(root)
+    _unwrap_font_elements(root)
+    _normalize_inline_spans(root)
+    _classify_blocks(root, is_front_matter)
+    _strip_unclassified_classes(root)
     _write_xml(tree, content_file)
     return True
 
@@ -264,28 +384,121 @@ def _sanitize_links(root: etree._Element) -> None:
                 del element.attrib[attr]
 
 
-def _classify_blocks(root: etree._Element) -> None:
+def _strip_publisher_presentation(root: etree._Element) -> None:
+    for element in root.xpath("//*"):
+        for attr in list(element.attrib):
+            local_attr = attr.rsplit("}", 1)[-1].lower()
+            if local_attr in PRESENTATION_ATTRS:
+                del element.attrib[attr]
+
+
+def _unwrap_font_elements(root: etree._Element) -> None:
+    for element in list(root.xpath("//*[local-name()='font']")):
+        parent = element.getparent()
+        if parent is None:
+            continue
+        index = parent.index(element)
+        if element.text:
+            if index == 0:
+                parent.text = (parent.text or "") + element.text
+            else:
+                previous = parent[index - 1]
+                previous.tail = (previous.tail or "") + element.text
+        for child in list(element):
+            element.remove(child)
+            parent.insert(index, child)
+            index += 1
+        if element.tail:
+            if index == 0:
+                parent.text = (parent.text or "") + element.tail
+            elif index <= len(parent):
+                parent[index - 1].tail = (parent[index - 1].tail or "") + element.tail
+        parent.remove(element)
+
+
+def _normalize_inline_spans(root: etree._Element) -> None:
+    for span in root.xpath("//*[local-name()='span']"):
+        classes = set(span.attrib.get("class", "").lower().split())
+        if classes & {"bold"}:
+            _rename_element(span, "strong")
+            span.attrib.pop("class", None)
+        elif classes & {"italic", "ital"}:
+            _rename_element(span, "em")
+            span.attrib.pop("class", None)
+        elif classes & {"underline"}:
+            _replace_classes(span, "eo-underline")
+        elif classes & {"strike"}:
+            _replace_classes(span, "eo-strike")
+        elif classes & {"overline"}:
+            _replace_classes(span, "eo-overline")
+        elif classes & {"smallcaps", "small-cap", "small-caps"}:
+            _replace_classes(span, "eo-smallcaps")
+        else:
+            span.attrib.pop("class", None)
+
+
+def _rename_element(element: etree._Element, local_name: str) -> None:
+    namespace = etree.QName(element).namespace
+    element.tag = f"{{{namespace}}}{local_name}" if namespace else local_name
+
+
+def _classify_blocks(root: etree._Element, is_front_matter: bool) -> None:
     after_boundary = True
     for element in root.xpath("//*[local-name()='body']//*[self::*]"):
         local = etree.QName(element).localname.lower()
         source_classes = set(element.attrib.get("class", "").lower().split())
 
         if local in {"h1", "h2", "h3", "h4", "h5", "h6"}:
-            _replace_classes(element, _heading_role(local, source_classes))
+            _replace_classes(element, _heading_role(local, source_classes, is_front_matter))
+            after_boundary = True
+            continue
+
+        if local in {"ol", "ul"}:
+            _replace_classes(element, "eo-list")
+            after_boundary = True
+            continue
+
+        if local == "blockquote":
+            _replace_classes(element, "eo-blockquote")
+            after_boundary = True
+            continue
+
+        if local in {"figcaption"}:
+            _replace_classes(element, "eo-caption")
+            after_boundary = True
+            continue
+
+        if local in {"aside"}:
+            _replace_classes(element, "eo-footnote")
             after_boundary = True
             continue
 
         if local == "p":
-            role = _paragraph_role(source_classes, after_boundary)
+            role = _paragraph_role(element, source_classes, after_boundary, is_front_matter)
             _replace_classes(element, role)
-            after_boundary = False
+            after_boundary = role in {
+                "eo-caption",
+                "eo-centered",
+                "eo-extract",
+                "eo-footnote",
+                "eo-image",
+                "eo-poetry",
+                "eo-scene-break",
+            }
             continue
 
-        if local in {"div", "figure"}:
+        if local in {"div", "figure", "section"}:
             role = _container_role(source_classes)
             if role:
                 _replace_classes(element, role)
-                after_boundary = role in {"eo-image", "eo-extract"}
+                after_boundary = role in {
+                    "eo-dedication",
+                    "eo-extract",
+                    "eo-footnote",
+                    "eo-image",
+                    "eo-poetry",
+                    "eo-toc",
+                }
 
         if local == "img":
             parent = element.getparent()
@@ -295,56 +508,98 @@ def _classify_blocks(root: etree._Element) -> None:
             after_boundary = True
 
 
-def _heading_role(local: str, classes: set[str]) -> str:
-    if any(cls.startswith("chapter") for cls in classes):
-        return "eo-chapter"
+def _heading_role(local: str, classes: set[str], is_front_matter: bool) -> str:
     if "part" in classes:
         return "eo-part"
+    if is_front_matter or classes & FRONT_MATTER_HINTS:
+        return "eo-front"
+    if any(cls.startswith("chapter") for cls in classes):
+        return "eo-chapter"
     if "section" in classes or local not in {"h1"}:
         return "eo-section"
-    if classes & {
-        "acknowledgments",
-        "authorsnote",
-        "foreword",
-        "preface",
-        "introduction",
-        "prologue",
-        "epilogue",
-        "afterward",
-        "glossary",
-        "appendix",
-        "notes",
-        "bibliography",
-        "abouttheauthor",
-        "contents",
-        "toc",
-    }:
-        return "eo-front"
     return "eo-chapter"
 
 
-def _paragraph_role(classes: set[str], after_boundary: bool) -> str:
-    if classes & {"caption"}:
+def _paragraph_role(
+    element: etree._Element,
+    classes: set[str],
+    after_boundary: bool,
+    is_front_matter: bool,
+) -> str:
+    if _contains_direct_image(element):
+        return "eo-image"
+    if _is_scene_break(element):
+        return "eo-scene-break"
+    if classes & {"caption", "figcaption"}:
         return "eo-caption"
     if classes & {"center", "center0", "bl_center"}:
         return "eo-centered"
     if classes & {"right", "bl_right", "attribution"}:
         return "eo-right"
-    if classes & {"extract", "extract1", "bl_extract", "bl_nonindent", "bl_indent"}:
+    if classes & {"poem", "poetry", "verse", "line", "stanza"}:
+        return "eo-poetry"
+    if classes & {"footnote", "note", "endnote"}:
+        return "eo-footnote"
+    if classes & {"hanging", "reference", "bl_hanging", "d_hanging"}:
+        return "eo-hanging"
+    if classes & {"extract", "extract1", "bl_extract", "bl_nonindent", "bl_indent", "stanga"}:
         return "eo-extract"
     if classes & {"nonindent", "nonindent1"} or after_boundary:
         return "eo-first"
+    if is_front_matter:
+        return "eo-front-body"
     return "eo-body"
 
 
 def _container_role(classes: set[str]) -> str | None:
+    if classes & {"part"}:
+        return "eo-part"
     if classes & {"cover", "titlepage", "dis_img"}:
         return "eo-image"
-    if classes & {"block", "textbox", "abstract"}:
+    if classes & {"block", "textbox", "abstract", "epigraph"}:
         return "eo-extract"
-    if classes & {"dedication", "copyright", "toc", "toc_fm", "toc_bm", "toc_chap", "toc_part"}:
+    if classes & {"poem", "poetry", "verse", "stanza"}:
+        return "eo-poetry"
+    if classes & {"hanging", "dialogue"}:
+        return "eo-hanging"
+    if classes & {"footnote", "note", "endnote"}:
+        return "eo-footnote"
+    if classes & {"dedication"}:
+        return "eo-dedication"
+    if classes & {"toc", "toc_fm", "toc_bm", "toc_chap", "toc_part", "toc_sub"}:
+        return "eo-toc"
+    if classes & {"copyright", "otherbooks", "titlepage"}:
         return "eo-centered"
     return None
+
+
+def _contains_direct_image(element: etree._Element) -> bool:
+    return any(etree.QName(child).localname.lower() == "img" for child in element)
+
+
+def _is_scene_break(element: etree._Element) -> bool:
+    text = " ".join("".join(element.itertext()).split())
+    return text in {"*", "* * *", "***", "****", "*****"}
+
+
+def _is_front_matter_item(item: etree._Element) -> bool:
+    values = " ".join(
+        [
+            item.attrib.get("id", ""),
+            item.attrib.get("href", ""),
+            item.attrib.get("properties", ""),
+        ]
+    ).lower()
+    return any(hint in values for hint in FRONT_MATTER_HINTS)
+
+
+def _strip_unclassified_classes(root: etree._Element) -> None:
+    for element in root.xpath("//*[@class]"):
+        classes = [cls for cls in element.attrib["class"].split() if cls.startswith("eo-")]
+        if classes:
+            element.attrib["class"] = " ".join(classes)
+        else:
+            del element.attrib["class"]
 
 
 def _replace_classes(element: etree._Element, class_name: str) -> None:

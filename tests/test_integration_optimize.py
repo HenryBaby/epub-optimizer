@@ -12,23 +12,38 @@ def test_optimize_minimal_epub(tmp_path: Path) -> None:
     result = optimize_epub(source, output_dir)
 
     assert result.content_documents_processed == 1
-    assert result.stylesheets_replaced == 1
+    assert result.stylesheets_replaced == 3
     assert result.output_path.is_file()
 
     with zipfile.ZipFile(result.output_path) as archive:
-        assert archive.namelist()[0] == "mimetype"
+        names = archive.namelist()
+        assert names[0] == "mimetype"
         assert archive.read("mimetype") == b"application/epub+zip"
         opf = archive.read("OEBPS/content.opf").decode("utf-8")
         chapter = archive.read("OEBPS/Text/chapter.xhtml").decode("utf-8")
         css = archive.read("OEBPS/Styles/epub-optimizer.css").decode("utf-8")
 
+    assert "OEBPS/Styles/old.css" not in names
+    assert "OEBPS/Fonts/publisher.woff2" not in names
+    assert "OEBPS/Misc/page-template.xpgt" not in names
     assert "epub-optimizer.css" in opf
     assert "old.css" not in opf
+    assert "publisher.woff2" not in opf
+    assert "page-template.xpgt" not in opf
     assert "../Styles/epub-optimizer.css" in chapter
     assert 'class="eo-chapter"' in chapter
     assert 'class="eo-first"' in chapter
     assert 'class="eo-body"' in chapter
+    assert 'style="' not in chapter
+    assert 'class="publisher"' not in chapter
     assert "font-family: inherit" in css
+
+    second_result = optimize_epub(result.output_path, tmp_path / "out-second")
+    with zipfile.ZipFile(second_result.output_path) as archive:
+        assert "OEBPS/Styles/epub-optimizer.css" in archive.namelist()
+        second_opf = archive.read("OEBPS/content.opf").decode("utf-8")
+
+    assert second_opf.count("epub-optimizer.css") == 1
 
 
 def _write_minimal_epub(path: Path) -> None:
@@ -60,6 +75,10 @@ def _write_minimal_epub(path: Path) -> None:
   <manifest>
     <item id="chapter" href="Text/chapter.xhtml" media-type="application/xhtml+xml"/>
     <item id="old-css" href="Styles/old.css" media-type="text/css"/>
+    <item id="font" href="Fonts/publisher.woff2" media-type="font/woff2"/>
+    <item id="page-template"
+          href="Misc/page-template.xpgt"
+          media-type="application/vnd.adobe-page-template+xml"/>
   </manifest>
   <spine>
     <itemref idref="chapter"/>
@@ -71,6 +90,8 @@ def _write_minimal_epub(path: Path) -> None:
             "OEBPS/Styles/old.css",
             "body { font-family: PublisherFont; margin: 2em; }",
         )
+        archive.writestr("OEBPS/Fonts/publisher.woff2", b"fake-font")
+        archive.writestr("OEBPS/Misc/page-template.xpgt", "page-template")
         archive.writestr(
             "OEBPS/Text/chapter.xhtml",
             """<?xml version="1.0" encoding="utf-8"?>
@@ -81,8 +102,8 @@ def _write_minimal_epub(path: Path) -> None:
   </head>
   <body>
     <h1 class="chapter">Chapter One</h1>
-    <p class="nonindent">First paragraph with <em>emphasis</em>.</p>
-    <p class="indent">Second paragraph.</p>
+    <p class="nonindent" style="margin: 2em;">First paragraph with <em>emphasis</em>.</p>
+    <p class="indent"><span class="publisher">Second</span> paragraph.</p>
   </body>
 </html>
 """,

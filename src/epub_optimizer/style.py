@@ -1,6 +1,10 @@
 CANONICAL_CSS = """\
 @namespace epub "http://www.idpf.org/2007/ops";
 
+* {
+  box-sizing: border-box;
+}
+
 html,
 body {
   margin: 0;
@@ -9,6 +13,8 @@ body {
 
 body {
   font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
 }
 
 p {
@@ -24,37 +30,53 @@ p.eo-first {
   text-indent: 0;
 }
 
+p.eo-front-body {
+  margin: 0;
+  text-align: justify;
+  text-indent: 1em;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  break-after: avoid;
+  page-break-after: avoid;
+  hyphens: none;
+}
+
 h1.eo-chapter,
-h2.eo-chapter {
+h2.eo-chapter,
+h3.eo-chapter {
   margin: 2em 0 3em;
   font-size: 1.2em;
   line-height: 1.3;
   font-weight: bold;
   text-align: left;
-  break-after: avoid;
-  page-break-after: avoid;
 }
 
 h1.eo-part,
-h2.eo-part {
+h2.eo-part,
+h3.eo-part {
   margin: 3em 0 2em;
   font-size: 1.4em;
   line-height: 1.3;
   font-weight: normal;
   text-align: center;
-  break-after: avoid;
-  page-break-after: avoid;
 }
 
 h1.eo-front,
 h2.eo-front,
-h3.eo-front {
+h3.eo-front,
+h4.eo-front,
+h5.eo-front,
+h6.eo-front {
   margin: 3em 0 2em;
   font-size: 1em;
   font-weight: bold;
   text-align: center;
-  break-after: avoid;
-  page-break-after: avoid;
 }
 
 h1.eo-section,
@@ -67,37 +89,67 @@ h6.eo-section {
   font-size: 1.05em;
   font-weight: normal;
   text-align: left;
-  break-after: avoid;
-  page-break-after: avoid;
 }
 
-.eo-centered {
+p.eo-centered,
+div.eo-centered {
+  margin: 1em 0;
+  text-indent: 0;
   text-align: center;
 }
 
-.eo-right {
+p.eo-right,
+div.eo-right {
+  margin: 0;
+  text-indent: 0;
   text-align: right;
 }
 
-.eo-extract,
-blockquote {
-  margin: 1em 1.4em;
+.eo-dedication {
+  margin: 4em 0 0;
+  text-align: center;
 }
 
-.eo-extract p,
-blockquote p {
+.eo-toc {
+  margin: 1em 0;
+  text-align: center;
+}
+
+p.eo-scene-break {
+  margin: 1.5em 0;
+  text-align: center;
   text-indent: 0;
 }
 
-.eo-caption {
+div.eo-extract,
+p.eo-extract,
+blockquote.eo-blockquote,
+blockquote {
+  margin: 1em 1.4em;
+  text-align: justify;
+  text-indent: 0;
+}
+
+.eo-extract p,
+blockquote p,
+p.eo-blockquote {
+  text-indent: 0;
+}
+
+p.eo-caption,
+figcaption.eo-caption {
   margin: 0.5em 0 1em;
   text-align: center;
   font-style: italic;
+  text-indent: 0;
 }
 
-.eo-image {
+div.eo-image,
+figure.eo-image,
+p.eo-image {
   margin: 1em 0;
   text-align: center;
+  text-indent: 0;
 }
 
 img {
@@ -105,12 +157,82 @@ img {
   max-height: 100%;
 }
 
+div.eo-poetry,
+p.eo-poetry,
+pre.eo-poetry {
+  margin: 1em 0 1em 2em;
+  text-align: left;
+  white-space: pre-wrap;
+  text-indent: 0;
+}
+
+div.eo-hanging,
+p.eo-hanging {
+  margin-left: 1em;
+  text-align: justify;
+  text-indent: -1em;
+}
+
+aside.eo-footnote,
+div.eo-footnote,
+p.eo-footnote {
+  margin-top: 1em;
+  font-size: 0.9em;
+  text-align: justify;
+  text-indent: 0;
+}
+
 ol,
 ul {
+  margin: 1em 0;
   text-align: justify;
+}
+
+ol.eo-list,
+ul.eo-list {
+  margin: 1em 0;
 }
 
 a {
   color: inherit;
+  text-decoration: none;
+}
+
+em,
+i {
+  font-style: italic;
+}
+
+strong,
+b {
+  font-weight: bold;
+}
+
+sup {
+  vertical-align: super;
+  font-size: 0.75em;
+  line-height: 0;
+}
+
+sub {
+  vertical-align: sub;
+  font-size: 0.75em;
+  line-height: 0;
+}
+
+.eo-underline {
+  text-decoration: underline;
+}
+
+.eo-strike {
+  text-decoration: line-through;
+}
+
+.eo-overline {
+  text-decoration: overline;
+}
+
+.eo-smallcaps {
+  font-variant: small-caps;
 }
 """
