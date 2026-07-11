@@ -68,6 +68,7 @@ FRONT_MATTER_HINTS = {
     "ack",
     "acknowledg",
     "afterword",
+    "alsoby",
     "appendix",
     "ata",
     "author",
@@ -431,7 +432,9 @@ def _normalize_inline_spans(root: etree._Element) -> None:
             _replace_classes(span, "eo-strike")
         elif classes & {"overline"}:
             _replace_classes(span, "eo-overline")
-        elif classes & {"smallcaps", "small-cap", "small-caps"}:
+        elif classes & {"smallcaps", "small-cap", "small-caps"} or _is_probable_smallcaps_span(
+            span
+        ):
             _replace_classes(span, "eo-smallcaps")
         else:
             span.attrib.pop("class", None)
@@ -497,6 +500,10 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
                     _replace_classes(element, role)
                     after_boundary = True
                 else:
+                    if _has_block_children(element):
+                        _replace_classes(element, role)
+                        after_boundary = True
+                        continue
                     _rename_element(element, "p")
                     _replace_classes(element, role)
                     after_boundary = role in {
@@ -508,6 +515,23 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
                         "eo-poetry",
                         "eo-scene-break",
                     }
+                continue
+
+        if local == "div" and document_role == "front":
+            role = _front_nested_div_role(element, after_boundary)
+            if role:
+                if role == "eo-front":
+                    _rename_element(element, "h1")
+                    _replace_classes(element, role)
+                    after_boundary = True
+                else:
+                    if _has_block_children(element):
+                        _replace_classes(element, role)
+                        after_boundary = True
+                        continue
+                    _rename_element(element, "p")
+                    _replace_classes(element, role)
+                    after_boundary = role in {"eo-scene-break", "eo-image"}
                 continue
 
         if local in {"div", "figure", "section"}:
@@ -614,8 +638,10 @@ def _anonymous_div_role(
         return "eo-image"
     if _is_scene_break(element):
         return "eo-scene-break"
+    if _is_empty_block(element):
+        return "eo-scene-break"
     if _has_block_children(element):
-        return None
+        return "eo-front-body" if document_role == "front" else None
 
     text = _normalized_text(element)
     if not text:
@@ -639,6 +665,22 @@ def _anonymous_div_role(
     if after_boundary and _is_first_meaningful_body_child(element) and _is_short_heading_text(text):
         return "eo-chapter"
     return "eo-first" if after_boundary else "eo-body"
+
+
+def _front_nested_div_role(element: etree._Element, after_boundary: bool) -> str | None:
+    if _contains_direct_image(element):
+        return "eo-image"
+    if _is_scene_break(element) or _is_empty_block(element):
+        return "eo-scene-break"
+    if _has_block_children(element):
+        return "eo-front-body"
+
+    text = _normalized_text(element)
+    if not text:
+        return None
+    if after_boundary and _is_first_meaningful_sibling(element) and _is_short_heading_text(text):
+        return "eo-front"
+    return "eo-front-body"
 
 
 def _has_block_children(element: etree._Element) -> bool:
@@ -675,8 +717,34 @@ def _is_first_meaningful_body_child(element: etree._Element) -> bool:
     return False
 
 
+def _is_first_meaningful_sibling(element: etree._Element) -> bool:
+    parent = element.getparent()
+    if parent is None:
+        return False
+    for child in parent:
+        if not isinstance(child.tag, str):
+            continue
+        if etree.QName(child).localname.lower() in {"script", "style"}:
+            continue
+        if _normalized_text(child) or _contains_direct_image(child):
+            return child is element
+    return False
+
+
 def _normalized_text(element: etree._Element) -> str:
     return " ".join("".join(element.itertext()).split())
+
+
+def _is_empty_block(element: etree._Element) -> bool:
+    return not _normalized_text(element) and not len(element)
+
+
+def _is_probable_smallcaps_span(element: etree._Element) -> bool:
+    text = _normalized_text(element)
+    if len(text) < 2:
+        return False
+    letters = [char for char in text if char.isalpha()]
+    return bool(letters) and all(char.upper() == char for char in letters)
 
 
 def _is_short_heading_text(text: str) -> bool:

@@ -61,11 +61,27 @@ def test_optimize_root_opf_anonymous_div_chapter(tmp_path: Path) -> None:
     assert "Styles/old.css" not in names
     assert 'href="Styles/epub-optimizer.css"' in opf
     assert 'href="../Styles/epub-optimizer.css"' in chapter
-    assert (
-        '<h1 class="eo-chapter">C<span>ITIES</span> &amp; M<span>EMORY</span> • 1</h1>'
-        in chapter
-    )
-    assert '<p class="eo-first">L<span>EAVING THERE AND</span> proceeding east.</p>' in chapter
+    assert 'class="eo-chapter"' in chapter
+    assert 'class="eo-smallcaps">ITIES</span>' in chapter
+    assert '<p class="eo-first">L<span class="eo-smallcaps">EAVING THERE AND</span>' in chapter
+
+
+def test_optimize_front_matter_nested_divs_and_empty_breaks(tmp_path: Path) -> None:
+    source = tmp_path / "front.epub"
+    _write_front_matter_div_epub(source)
+
+    result = optimize_epub(source, tmp_path / "out-front")
+
+    with zipfile.ZipFile(result.output_path) as archive:
+        front = archive.read("OEBPS/alsoby.xhtml").decode("utf-8")
+        chapter = archive.read("OEBPS/chapter.xhtml").decode("utf-8")
+
+    assert 'class="eo-front-body"' in front
+    assert '<h1 class="eo-front">ALSO BY WRITER</h1>' in front
+    assert '<p class="eo-front-body"><i>First Book</i></p>' in front
+    assert '<p class="eo-front-body"><i>Second Book</i></p>' in front
+    assert '<span class="eo-smallcaps">ITIES</span>' in chapter
+    assert '<p class="eo-scene-break"/>' in chapter or '<p class="eo-scene-break"></p>' in chapter
 
 
 def _write_minimal_epub(path: Path) -> None:
@@ -180,6 +196,73 @@ def _write_root_opf_div_chapter_epub(path: Path) -> None:
   <body>
     <div class="calibre-heading">C<span>ITIES</span> &amp; M<span>EMORY</span> • 1</div>
     <div class="calibre-body">L<span>EAVING THERE AND</span> proceeding east.</div>
+  </body>
+</html>
+""",
+        )
+
+
+def _write_front_matter_div_epub(path: Path) -> None:
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr(
+            "mimetype",
+            "application/epub+zip",
+            compress_type=zipfile.ZIP_STORED,
+        )
+        archive.writestr(
+            "META-INF/container.xml",
+            """<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>
+""",
+        )
+        archive.writestr(
+            "content.opf",
+            """<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="id" version="3.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="id">urn:test-front</dc:identifier>
+    <dc:title>Front Test</dc:title>
+    <dc:language>en</dc:language>
+  </metadata>
+  <manifest>
+    <item id="alsoby" href="OEBPS/alsoby.xhtml" media-type="application/xhtml+xml"/>
+    <item id="chapter" href="OEBPS/chapter.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="alsoby"/>
+    <itemref idref="chapter"/>
+  </spine>
+</package>
+""",
+        )
+        archive.writestr(
+            "OEBPS/alsoby.xhtml",
+            """<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head><title>Front Test</title></head>
+  <body>
+    <div>
+      <div>ALSO BY WRITER</div>
+      <div><i>First Book</i></div>
+      <div><i>Second Book</i></div>
+    </div>
+  </body>
+</html>
+""",
+        )
+        archive.writestr(
+            "OEBPS/chapter.xhtml",
+            """<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head><title>Front Test</title></head>
+  <body>
+    <div>C<span>ITIES</span> • 1</div>
+    <div/>
+    <div>First body paragraph.</div>
   </body>
 </html>
 """,

@@ -235,4 +235,8 @@ sub {
 .eo-smallcaps {
   font-variant: small-caps;
 }
+
+span.eo-smallcaps {
+  font-variant: small-caps;
+}
 """
