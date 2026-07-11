@@ -1,0 +1,7 @@
+services:
+  epub-optimizer:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      EPUB_OPTIMIZER_MAX_UPLOAD_MB: "100"

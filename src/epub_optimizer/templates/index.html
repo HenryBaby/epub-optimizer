@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>EPUB Optimizer</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='/styles.css') }}">
+  </head>
+  <body>
+    <main class="shell">
+      <section class="panel">
+        <h1>EPUB Optimizer</h1>
+        <form action="/optimize" method="post" enctype="multipart/form-data">
+          <label for="file">EPUB file</label>
+          <input id="file" name="file" type="file" accept=".epub,application/epub+zip" required>
+          <p class="hint">Maximum upload size: {{ max_upload_mb }} MB</p>
+          <button type="submit">Optimize EPUB</button>
+        </form>
+      </section>
+
+      {% if error %}
+      <section class="notice error">
+        <h2>Processing failed</h2>
+        <p>{{ error }}</p>
+      </section>
+      {% endif %}
+
+      {% if result %}
+      <section class="panel result">
+        <div class="result-header">
+          <div>
+            <h2>Optimization complete</h2>
+            <p>{{ "%.2f"|format(result.elapsed_seconds) }} seconds</p>
+          </div>
+          <a class="button" href="/download/{{ download_name }}">Download EPUB</a>
+        </div>
+
+        <dl class="stats">
+          <div>
+            <dt>Input</dt>
+            <dd>{{ result.input_filename }}</dd>
+          </div>
+          <div>
+            <dt>Output</dt>
+            <dd>{{ result.output_filename }}</dd>
+          </div>
+          <div>
+            <dt>EPUB version</dt>
+            <dd>{{ result.epub_version or "Unknown" }}</dd>
+          </div>
+          <div>
+            <dt>Package</dt>
+            <dd>{{ result.package_path }}</dd>
+          </div>
+          <div>
+            <dt>Documents</dt>
+            <dd>{{ result.content_documents_processed }}</dd>
+          </div>
+          <div>
+            <dt>Stylesheets</dt>
+            <dd>{{ result.stylesheets_replaced }}</dd>
+          </div>
+          <div>
+            <dt>Images</dt>
+            <dd>{{ result.images_preserved }}</dd>
+          </div>
+        </dl>
+
+        {% if result.warnings %}
+        <h3>Warnings</h3>
+        <ul class="log warnings">
+          {% for warning in result.warnings %}
+          <li>{{ warning }}</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+
+        <h3>Processing log</h3>
+        <ol class="log">
+          {% for entry in result.log %}
+          <li>{{ entry }}</li>
+          {% endfor %}
+        </ol>
+      </section>
+      {% endif %}
+    </main>
+  </body>
+</html>

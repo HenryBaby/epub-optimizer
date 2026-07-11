@@ -1,0 +1,38 @@
+[project]
+name = "epub-optimizer"
+version = "0.1.0"
+description = "A small local web app for normalizing EPUB typography into a stable house style."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "defusedxml>=0.7.1",
+  "fastapi>=0.116.0",
+  "jinja2>=3.1.6",
+  "lxml>=6.0.0",
+  "python-multipart>=0.0.20",
+  "uvicorn[standard]>=0.35.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.4.0",
+  "ruff>=0.12.0",
+]
+
+[build-system]
+requires = ["setuptools>=80.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
