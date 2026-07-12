@@ -53,9 +53,9 @@ GitHub Actions validates Docker builds on pull requests and pushes to `main`.
 Pushing a matching version tag publishes the image:
 
 ```text
-pyproject.toml version = 0.1.32
-git tag v0.1.32
-git push origin v0.1.32
+pyproject.toml version = 1.0.0
+git tag v1.0.0
+git push origin v1.0.0
 ```
 
 Published tags:

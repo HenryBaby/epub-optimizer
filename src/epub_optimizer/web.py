@@ -82,7 +82,7 @@ def download_archive(filename: str) -> FileResponse:
         path,
         filename=safe_name,
         media_type="application/zip",
-        background=BackgroundTask(_remove_download, path),
+        background=BackgroundTask(_remove_archive_downloads, path),
     )
 
 
@@ -233,6 +233,7 @@ async def _optimization_events(files: list[UploadFile]) -> AsyncIterator[str]:
         if completed_downloads:
             archive_name = _unique_download_name(persistent_output, "optimized-epubs.zip")
             _write_download_archive(persistent_output, archive_name, completed_downloads)
+            _write_archive_manifest(persistent_output, archive_name, completed_downloads)
             yield _json_event(
                 "complete",
                 successful=successful,
@@ -251,6 +252,12 @@ def _write_download_archive(output_dir: Path, archive_name: str, filenames: list
             file_path = output_dir / safe_name
             if file_path.is_file():
                 archive.write(file_path, arcname=safe_name)
+
+
+def _write_archive_manifest(output_dir: Path, archive_name: str, filenames: list[str]) -> None:
+    manifest_path = _archive_manifest_path(output_dir / archive_name)
+    safe_names = [Path(filename).name for filename in filenames]
+    manifest_path.write_text(json.dumps(safe_names), encoding="utf-8")
 
 
 def _unique_download_name(output_dir: Path, filename: str) -> str:
@@ -298,3 +305,18 @@ def _persistent_output_dir() -> Path:
 def _remove_download(path: Path) -> None:
     with suppress(FileNotFoundError):
         path.unlink()
+
+
+def _remove_archive_downloads(path: Path) -> None:
+    output_dir = path.parent
+    manifest_path = _archive_manifest_path(path)
+    with suppress(FileNotFoundError):
+        filenames = json.loads(manifest_path.read_text(encoding="utf-8"))
+        for filename in filenames:
+            _remove_download(output_dir / Path(filename).name)
+        manifest_path.unlink()
+    _remove_download(path)
+
+
+def _archive_manifest_path(path: Path) -> Path:
+    return path.with_name(f"{path.name}.json")
