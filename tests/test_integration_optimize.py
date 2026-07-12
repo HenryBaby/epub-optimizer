@@ -208,6 +208,20 @@ def test_optimize_metadata_pages_do_not_use_body_flow(tmp_path: Path) -> None:
     assert "eo-metadata-line" in css
 
 
+def test_optimize_swedish_filename_does_not_trigger_front_matter_hint(tmp_path: Path) -> None:
+    source = tmp_path / "swedish.epub"
+    _write_swedish_filename_epub(source)
+
+    result = optimize_epub(source, tmp_path / "out-swedish")
+
+    with zipfile.ZipFile(result.output_path) as archive:
+        chapter = archive.read("Man_som_hatar_kvinnor_split_1.html").decode("utf-8")
+
+    assert '<p class="eo-first">Första stycket i kapitlet.</p>' in chapter
+    assert '<p class="eo-body">Andra stycket i samma sammanhang.</p>' in chapter
+    assert "eo-front-body" not in chapter
+
+
 def test_optimize_part_pages_images_empty_blocks_and_ncx(tmp_path: Path) -> None:
     source = tmp_path / "structure.epub"
     _write_structure_cleanup_epub(source)
@@ -797,6 +811,57 @@ def _write_metadata_page_epub(path: Path) -> None:
     <p>Original title: <cite>Example</cite></p>
     <p>Digital editor: Example Editor</p>
     <p>ePub base r2.1</p>
+  </body>
+</html>
+""",
+        )
+
+
+def _write_swedish_filename_epub(path: Path) -> None:
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr(
+            "mimetype",
+            "application/epub+zip",
+            compress_type=zipfile.ZIP_STORED,
+        )
+        archive.writestr(
+            "META-INF/container.xml",
+            """<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>
+""",
+        )
+        archive.writestr(
+            "content.opf",
+            """<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="id" version="3.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="id">urn:test-swedish</dc:identifier>
+    <dc:title>Svenskt test</dc:title>
+    <dc:language>sv</dc:language>
+  </metadata>
+  <manifest>
+    <item id="id1"
+          href="Man_som_hatar_kvinnor_split_1.html"
+          media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="id1"/>
+  </spine>
+</package>
+""",
+        )
+        archive.writestr(
+            "Man_som_hatar_kvinnor_split_1.html",
+            """<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head><title>Svenskt test</title></head>
+  <body>
+    <p>Första stycket i kapitlet.</p>
+    <p>Andra stycket i samma sammanhang.</p>
   </body>
 </html>
 """,

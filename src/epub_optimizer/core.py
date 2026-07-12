@@ -1575,25 +1575,49 @@ def _document_role(item: etree._Element) -> str:
             " ".join(properties),
         ]
     ).lower()
-    if any(hint in values for hint in ("titlepage", "title-page", "title_page")):
+    tokens = set(_identifier_tokens(values))
+    if tokens & {"titlepage", "title-page", "title_page"}:
         return "title"
-    if "title" in values and not any(hint in values for hint in ("subtitle", "entitle")):
+    if "title" in tokens and not (tokens & {"subtitle", "entitle"}):
         return "title"
-    if any(hint in values for hint in ("colophon", "credits", "creditos", "info")):
+    if tokens & {"colophon", "credits", "creditos", "info"}:
         return "metadata"
-    if "prologue" in values:
+    if "prologue" in tokens:
         return "prologue"
-    if "introduction" in values or "/intro" in values or "intro" in values.split():
+    if tokens & {"introduction", "intro"}:
         return "introduction"
-    if any(hint in values for hint in FRONT_MATTER_HINTS):
-        if "toc" in values or "contents" in values:
-            return "toc"
+    if tokens & {"toc", "contents"}:
+        return "toc"
+    if _has_front_matter_hint(tokens):
         return "front"
-    if "part" in values:
+    if "part" in tokens or any(_has_numbered_prefix(token, "part") for token in tokens):
         return "part"
-    if "chapter" in values or "/chap" in values or "/ch" in values:
+    if (
+        "chapter" in tokens
+        or "chap" in tokens
+        or any(_has_numbered_prefix(token, "chapter") for token in tokens)
+        or any(_has_numbered_prefix(token, "chap") for token in tokens)
+        or "/chap" in values
+        or "/ch" in values
+    ):
         return "chapter"
     return "body"
+
+
+def _identifier_tokens(value: str) -> list[str]:
+    normalized = "".join(char.lower() if char.isalnum() else " " for char in value)
+    return normalized.split()
+
+
+def _has_front_matter_hint(tokens: set[str]) -> bool:
+    if tokens & FRONT_MATTER_HINTS:
+        return True
+    return any(token.startswith("acknowledg") for token in tokens)
+
+
+def _has_numbered_prefix(token: str, prefix: str) -> bool:
+    suffix = token.removeprefix(prefix)
+    return suffix != token and bool(suffix) and suffix[0].isdigit()
 
 
 def _strip_unclassified_classes(root: etree._Element) -> None:
