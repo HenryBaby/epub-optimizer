@@ -144,6 +144,21 @@ def test_optimize_opaque_also_by_works_list(tmp_path: Path) -> None:
     assert "eo-front-section" in css
 
 
+def test_optimize_opening_epigraph_resets_first_body_paragraph(tmp_path: Path) -> None:
+    source = tmp_path / "epigraph.epub"
+    _write_opening_epigraph_epub(source)
+
+    result = optimize_epub(source, tmp_path / "out-epigraph")
+
+    with zipfile.ZipFile(result.output_path) as archive:
+        chapter = archive.read("OEBPS/chapter.xhtml").decode("utf-8")
+
+    assert '<p class="eo-extract"><i>This is a long opening epigraph' in chapter
+    assert '<p class="eo-extract"><b>--The Stolen Journals</b></p>' in chapter
+    assert '<p class="eo-first">The first narrative paragraph starts here.</p>' in chapter
+    assert '<p class="eo-body">The following paragraph continues the same scene.</p>' in chapter
+
+
 def test_optimize_part_pages_images_empty_blocks_and_ncx(tmp_path: Path) -> None:
     source = tmp_path / "structure.epub"
     _write_structure_cleanup_epub(source)
@@ -522,6 +537,59 @@ def _write_opaque_works_list_epub(path: Path) -> None:
     <p><em>Second Book</em></p>
     <p>POETRY</p>
     <p><em>Collected Poems</em></p>
+  </body>
+</html>
+""",
+        )
+
+
+def _write_opening_epigraph_epub(path: Path) -> None:
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr(
+            "mimetype",
+            "application/epub+zip",
+            compress_type=zipfile.ZIP_STORED,
+        )
+        archive.writestr(
+            "META-INF/container.xml",
+            """<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>
+""",
+        )
+        archive.writestr(
+            "content.opf",
+            """<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="id" version="3.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="id">urn:test-epigraph</dc:identifier>
+    <dc:title>Epigraph Test</dc:title>
+    <dc:language>en</dc:language>
+  </metadata>
+  <manifest>
+    <item id="chapter" href="OEBPS/chapter.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="chapter"/>
+  </spine>
+</package>
+""",
+        )
+        archive.writestr(
+            "OEBPS/chapter.xhtml",
+            """<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head><title>Epigraph Test</title></head>
+  <body>
+    <h1>Chapter One</h1>
+    <p><i>This is a long opening epigraph that belongs before the narrative
+    and should not consume the first body paragraph indentation.</i></p>
+    <p><b>--The Stolen Journals</b></p>
+    <p>The first narrative paragraph starts here.</p>
+    <p>The following paragraph continues the same scene.</p>
   </body>
 </html>
 """,

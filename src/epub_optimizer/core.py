@@ -638,6 +638,7 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
     after_boundary = True
     is_front_matter = document_role in {"front", "title", "works"}
     title_line_index = 0
+    opening_epigraph = False
     for element in root.xpath("//*[local-name()='body']//*[self::*]"):
         local = etree.QName(element).localname.lower()
         source_classes = set(element.attrib.get("class", "").lower().split())
@@ -656,9 +657,11 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
             if document_role == "works":
                 _replace_classes(element, "eo-front")
                 after_boundary = True
+                opening_epigraph = False
                 continue
             _replace_classes(element, _heading_role(local, source_classes, is_front_matter))
             after_boundary = True
+            opening_epigraph = False
             continue
 
         if local in {"ol", "ul"}:
@@ -711,6 +714,20 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
                 _replace_classes(element, role)
                 after_boundary = role in {"eo-front", "eo-front-section", "eo-image"}
                 continue
+            if (
+                after_boundary
+                and not is_front_matter
+                and _is_opening_epigraph_paragraph(element)
+            ):
+                _replace_classes(element, "eo-extract")
+                after_boundary = True
+                opening_epigraph = True
+                continue
+            if opening_epigraph and _is_opening_epigraph_attribution(element):
+                _replace_classes(element, "eo-extract")
+                after_boundary = True
+                opening_epigraph = False
+                continue
             role = _paragraph_role(element, source_classes, after_boundary, is_front_matter)
             _replace_classes(element, role)
             after_boundary = role in {
@@ -723,6 +740,7 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
                 "eo-poetry",
                 "eo-scene-break",
             }
+            opening_epigraph = role in {"eo-extract", "eo-scene-break"}
             continue
 
         if local == "div" and _is_direct_body_child(element):
@@ -749,10 +767,12 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
                     _rename_element(element, "h1")
                     _replace_classes(element, role)
                     after_boundary = True
+                    opening_epigraph = False
                 else:
                     if _has_block_children(element):
                         _replace_classes(element, role)
                         after_boundary = True
+                        opening_epigraph = False
                         continue
                     _rename_element(element, "p")
                     _replace_classes(element, role)
@@ -774,6 +794,7 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
                         "eo-toc-chapter",
                         "eo-toc-part",
                     }
+                    opening_epigraph = role in {"eo-extract", "eo-scene-break"}
                 continue
 
         if local == "div" and document_role == "front":
@@ -932,6 +953,46 @@ def _paragraph_role(
     if is_front_matter:
         return "eo-front-body"
     return "eo-body"
+
+
+def _is_opening_epigraph_paragraph(element: etree._Element) -> bool:
+    text = _normalized_text(element)
+    if not 20 <= len(text) <= 900:
+        return False
+    if _contains_direct_image(element):
+        return False
+    return _emphasized_text_ratio(element) >= 0.65
+
+
+def _is_opening_epigraph_attribution(element: etree._Element) -> bool:
+    text = _normalized_text(element)
+    if not text or len(text) > 140:
+        return False
+    if text.startswith(("-", "--", "—", "–")):
+        return True
+    classes = set(element.attrib.get("class", "").lower().split())
+    if classes & {"attribution", "source", "credit"}:
+        return True
+    return _bold_text_ratio(element) >= 0.6 and len(text.split()) <= 12
+
+
+def _emphasized_text_ratio(element: etree._Element) -> float:
+    return _tagged_text_ratio(element, {"em", "i"})
+
+
+def _bold_text_ratio(element: etree._Element) -> float:
+    return _tagged_text_ratio(element, {"strong", "b"})
+
+
+def _tagged_text_ratio(element: etree._Element, local_names: set[str]) -> float:
+    total = len(_normalized_text(element))
+    if total == 0:
+        return 0.0
+    tagged = 0
+    for child in element.xpath(".//*"):
+        if etree.QName(child).localname.lower() in local_names:
+            tagged += len(_normalized_text(child))
+    return min(tagged / total, 1.0)
 
 
 def _part_paragraph_role(element: etree._Element, after_boundary: bool) -> str:
