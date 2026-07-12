@@ -14,13 +14,14 @@ def test_homepage_renders() -> None:
 
     assert response.status_code == 200
     assert "EPUB Optimizer" in response.text
-    assert "v0.1.25" in response.text
+    assert "v0.1.27" in response.text
     assert 'id="optimizer-form"' in response.text
     assert 'name="files"' in response.text
     assert "multiple" in response.text
     assert 'id="theme-toggle"' in response.text
     assert 'id="file-summary"' in response.text
     assert 'id="progress-meter"' in response.text
+    assert 'id="download-all"' in response.text
     assert "/static/app.js" in response.text
 
 
@@ -45,7 +46,10 @@ def test_streaming_optimize_handles_url_significant_filename_chars(tmp_path, mon
     complete = next(event for event in events if event["type"] == "file_complete")
     assert "%23" in complete["download_url"]
     assert any(event["type"] == "log" for event in events)
-    assert events[-1] == {"type": "complete", "successful": 1, "failed": 0}
+    assert events[-1]["type"] == "complete"
+    assert events[-1]["successful"] == 1
+    assert events[-1]["failed"] == 0
+    assert events[-1]["batch_download_url"].startswith("/download-archive/")
 
     download = client.get(complete["download_url"])
 
@@ -84,7 +88,20 @@ def test_streaming_optimize_accepts_multiple_files(tmp_path, monkeypatch) -> Non
     completed = [event for event in events if event["type"] == "file_complete"]
 
     assert [event["filename"] for event in completed] == ["First.epub", "Second.epub"]
-    assert events[-1] == {"type": "complete", "successful": 2, "failed": 0}
+    assert events[-1]["type"] == "complete"
+    assert events[-1]["successful"] == 2
+    assert events[-1]["failed"] == 0
+    assert events[-1]["batch_download_url"].startswith("/download-archive/")
+
+    archive_response = client.get(events[-1]["batch_download_url"])
+
+    assert archive_response.status_code == 200
+    assert archive_response.headers["content-type"] == "application/zip"
+
+    with zipfile.ZipFile(BytesIO(archive_response.content)) as archive:
+        names = archive.namelist()
+
+    assert names == ["First-optimized.epub", "Second-optimized.epub"]
 
 
 def _minimal_epub_bytes() -> bytes:

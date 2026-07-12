@@ -9,6 +9,7 @@ const logWindow = document.querySelector("#processing-log");
 const logCount = document.querySelector("#log-count");
 const resultsPanel = document.querySelector("#results-panel");
 const resultsList = document.querySelector("#results-list");
+const downloadAll = document.querySelector("#download-all");
 const fileSummary = document.querySelector("#file-summary");
 const themeToggle = document.querySelector("#theme-toggle");
 
@@ -137,6 +138,10 @@ function handleEvent(event) {
       `${event.successful} complete, ${event.failed} failed.`,
       event.failed > 0 ? "Review" : "Done",
     );
+    if (event.batch_download_url) {
+      downloadAll.href = event.batch_download_url;
+      downloadAll.hidden = false;
+    }
   }
 }
 
@@ -219,6 +224,8 @@ function resetRun() {
   resultsList.replaceChildren();
   logCount.textContent = "0 entries";
   resultsPanel.hidden = true;
+  downloadAll.hidden = true;
+  downloadAll.removeAttribute("href");
   updateProgress();
 }
 

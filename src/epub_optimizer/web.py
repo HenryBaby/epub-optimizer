@@ -5,6 +5,7 @@ import json
 import os
 import tempfile
 import uuid
+import zipfile
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Annotated
@@ -58,6 +59,18 @@ def download(filename: str) -> FileResponse:
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Optimized EPUB is no longer available.")
     return FileResponse(path, filename=safe_name, media_type="application/epub+zip")
+
+
+@app.get("/download-archive/{filename}")
+def download_archive(filename: str) -> FileResponse:
+    safe_name = Path(filename).name
+    path = _persistent_output_dir() / safe_name
+    if not path.is_file() or path.suffix.lower() != ".zip":
+        raise HTTPException(
+            status_code=404,
+            detail="Optimized EPUB archive is no longer available.",
+        )
+    return FileResponse(path, filename=safe_name, media_type="application/zip")
 
 
 async def _save_upload(file: UploadFile, target: Path) -> None:
@@ -115,6 +128,7 @@ async def _optimization_events(files: list[UploadFile]) -> AsyncIterator[str]:
 
         failed = len(files) - len(uploads)
         successful = 0
+        completed_downloads: list[str] = []
         persistent_output = _persistent_output_dir()
         persistent_output.mkdir(parents=True, exist_ok=True)
 
@@ -183,6 +197,7 @@ async def _optimization_events(files: list[UploadFile]) -> AsyncIterator[str]:
                     warnings=result.warnings,
                 )
                 successful += 1
+                completed_downloads.append(download_name)
             except EpubOptimizerError as exc:
                 failed += 1
                 yield _json_event(
@@ -202,7 +217,27 @@ async def _optimization_events(files: list[UploadFile]) -> AsyncIterator[str]:
                     message="Optimization failed unexpectedly.",
                 )
 
-        yield _json_event("complete", successful=successful, failed=failed)
+        if completed_downloads:
+            archive_name = _unique_download_name(persistent_output, "optimized-epubs.zip")
+            _write_download_archive(persistent_output, archive_name, completed_downloads)
+            yield _json_event(
+                "complete",
+                successful=successful,
+                failed=failed,
+                batch_download_url=f"/download-archive/{quote(archive_name)}",
+            )
+        else:
+            yield _json_event("complete", successful=successful, failed=failed)
+
+
+def _write_download_archive(output_dir: Path, archive_name: str, filenames: list[str]) -> None:
+    archive_path = output_dir / archive_name
+    with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for filename in filenames:
+            safe_name = Path(filename).name
+            file_path = output_dir / safe_name
+            if file_path.is_file():
+                archive.write(file_path, arcname=safe_name)
 
 
 def _unique_download_name(output_dir: Path, filename: str) -> str:
