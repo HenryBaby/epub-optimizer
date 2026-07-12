@@ -122,6 +122,24 @@ def test_optimize_title_page_layout_roles(tmp_path: Path) -> None:
     assert "eo-title-main" in css
 
 
+def test_optimize_opaque_also_by_works_list(tmp_path: Path) -> None:
+    source = tmp_path / "works.epub"
+    _write_opaque_works_list_epub(source)
+
+    result = optimize_epub(source, tmp_path / "out-works")
+
+    with zipfile.ZipFile(result.output_path) as archive:
+        works = archive.read("OEBPS/adc.xhtml").decode("utf-8")
+        css = archive.read("Styles/epub-optimizer.css").decode("utf-8")
+
+    assert '<h1 class="eo-front">ALSO BY WRITER</h1>' in works
+    assert '<p class="eo-front-section">FICTION</p>' in works
+    assert '<p class="eo-front-list-item"><em>First Book</em></p>' in works
+    assert '<p class="eo-front-list-item"><em>Second Book</em></p>' in works
+    assert "eo-chapter" not in works
+    assert "eo-front-section" in css
+
+
 def test_optimize_part_pages_images_empty_blocks_and_ncx(tmp_path: Path) -> None:
     source = tmp_path / "structure.epub"
     _write_structure_cleanup_epub(source)
@@ -447,6 +465,59 @@ def _write_title_page_epub(path: Path) -> None:
       <p>Author Name</p>
       <p>PUBLISHER BOOKS<br/>City</p>
     </div>
+  </body>
+</html>
+""",
+        )
+
+
+def _write_opaque_works_list_epub(path: Path) -> None:
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr(
+            "mimetype",
+            "application/epub+zip",
+            compress_type=zipfile.ZIP_STORED,
+        )
+        archive.writestr(
+            "META-INF/container.xml",
+            """<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>
+""",
+        )
+        archive.writestr(
+            "content.opf",
+            """<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="id" version="3.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="id">urn:test-works</dc:identifier>
+    <dc:title>Works Test</dc:title>
+    <dc:language>en</dc:language>
+  </metadata>
+  <manifest>
+    <item id="adc" href="OEBPS/adc.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="adc"/>
+  </spine>
+</package>
+""",
+        )
+        archive.writestr(
+            "OEBPS/adc.xhtml",
+            """<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head><title>Works Test</title></head>
+  <body>
+    <h1>ALSO BY WRITER</h1>
+    <p>FICTION</p>
+    <p><em>First Book</em></p>
+    <p><em>Second Book</em></p>
+    <p>POETRY</p>
+    <p><em>Collected Poems</em></p>
   </body>
 </html>
 """,

@@ -42,6 +42,14 @@ p.eo-front-list-item {
   text-indent: 0;
 }
 
+p.eo-front-section {
+  margin: 1.4em 0 0.5em;
+  font-weight: bold;
+  text-align: center;
+  text-indent: 0;
+  text-transform: uppercase;
+}
+
 h1,
 h2,
 h3,

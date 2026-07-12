@@ -350,6 +350,7 @@ def _process_content_document(
     _unwrap_font_elements(root)
     _normalize_inline_spans(root)
     _remove_empty_blocks(root)
+    document_role = _refine_document_role(root, document_role)
     _classify_blocks(root, document_role)
     _strip_unclassified_classes(root)
     _write_xml(tree, content_file)
@@ -455,6 +456,50 @@ def _namespaced_tag(element: etree._Element, local_name: str) -> str:
     if qname.namespace:
         return f"{{{qname.namespace}}}{local_name}"
     return local_name
+
+
+def _refine_document_role(root: etree._Element, document_role: str) -> str:
+    if document_role in {"part", "title", "toc", "works"}:
+        return document_role
+    if _looks_like_works_list_document(root):
+        return "works"
+    return document_role
+
+
+def _looks_like_works_list_document(root: etree._Element) -> bool:
+    blocks = [
+        element
+        for element in root.xpath("//*[local-name()='body']//*[self::*]")
+        if etree.QName(element).localname.lower() in {"div", "h1", "h2", "h3", "p"}
+        and not _has_block_children(element)
+        and _normalized_text(element)
+    ]
+    if len(blocks) < 4:
+        return False
+
+    early_text = " ".join(_normalized_text(element).lower() for element in blocks[:4])
+    if not _has_works_list_heading(early_text):
+        return False
+
+    texts = [_normalized_text(element) for element in blocks[:80]]
+    short_count = sum(1 for text in texts if _is_short_list_text(text))
+    emphasized_count = sum(1 for element in blocks[:80] if _contains_emphasis(element))
+    category_count = sum(1 for text in texts if _is_works_category_text(text))
+    return short_count / len(texts) >= 0.65 and (emphasized_count >= 3 or category_count >= 1)
+
+
+def _has_works_list_heading(text: str) -> bool:
+    return any(
+        phrase in text
+        for phrase in {
+            "also by",
+            "also from",
+            "by the same author",
+            "other books by",
+            "other works by",
+            "works by",
+        }
+    )
 
 
 def _sanitize_links(root: etree._Element) -> None:
@@ -591,7 +636,7 @@ def _rename_element(element: etree._Element, local_name: str) -> None:
 
 def _classify_blocks(root: etree._Element, document_role: str) -> None:
     after_boundary = True
-    is_front_matter = document_role in {"front", "title"}
+    is_front_matter = document_role in {"front", "title", "works"}
     title_line_index = 0
     for element in root.xpath("//*[local-name()='body']//*[self::*]"):
         local = etree.QName(element).localname.lower()
@@ -607,6 +652,10 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
                 title_line_index += 1
                 _replace_classes(element, role)
                 after_boundary = role in {"eo-title-main", "eo-title-author"}
+                continue
+            if document_role == "works":
+                _replace_classes(element, "eo-front")
+                after_boundary = True
                 continue
             _replace_classes(element, _heading_role(local, source_classes, is_front_matter))
             after_boundary = True
@@ -655,6 +704,13 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
                 _replace_classes(element, role)
                 after_boundary = role in {"eo-image", "eo-title-main", "eo-title-author"}
                 continue
+            if document_role == "works":
+                role = _works_list_item_role(element, after_boundary)
+                if role == "eo-front":
+                    _rename_element(element, "h1")
+                _replace_classes(element, role)
+                after_boundary = role in {"eo-front", "eo-front-section", "eo-image"}
+                continue
             role = _paragraph_role(element, source_classes, after_boundary, is_front_matter)
             _replace_classes(element, role)
             after_boundary = role in {
@@ -676,6 +732,8 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
                 role = _title_div_role(element, title_line_index)
                 if role != "eo-title-page":
                     title_line_index += 1
+            elif document_role == "works":
+                role = _works_list_div_role(element, after_boundary)
             else:
                 container_role = _container_role(source_classes)
                 role = container_role or _anonymous_div_role(element, after_boundary, document_role)
@@ -703,8 +761,9 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
                         "eo-centered",
                         "eo-extract",
                         "eo-footnote",
-                        "eo-front-list-item",
-                        "eo-image",
+                    "eo-front-list-item",
+                    "eo-front-section",
+                    "eo-image",
                         "eo-poetry",
                         "eo-scene-break",
                         "eo-title-author",
@@ -732,6 +791,28 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
                     _rename_element(element, "p")
                     _replace_classes(element, role)
                     after_boundary = role in {"eo-front-list-item", "eo-scene-break", "eo-image"}
+                continue
+
+        if local == "div" and document_role == "works":
+            role = _works_list_div_role(element, after_boundary)
+            if role:
+                if role == "eo-front":
+                    _rename_element(element, "h1")
+                    _replace_classes(element, role)
+                    after_boundary = True
+                    continue
+                if _has_block_children(element):
+                    _replace_classes(element, role)
+                    after_boundary = True
+                    continue
+                _rename_element(element, "p")
+                _replace_classes(element, role)
+                after_boundary = role in {
+                    "eo-front",
+                    "eo-front-section",
+                    "eo-image",
+                    "eo-scene-break",
+                }
                 continue
 
         if local == "div" and document_role == "title":
@@ -1044,6 +1125,26 @@ def _front_nested_div_role(element: etree._Element, after_boundary: bool) -> str
     return "eo-front-body"
 
 
+def _works_list_div_role(element: etree._Element, after_boundary: bool) -> str | None:
+    if _has_block_children(element):
+        return "eo-front-body"
+    return _works_list_item_role(element, after_boundary)
+
+
+def _works_list_item_role(element: etree._Element, after_boundary: bool) -> str:
+    if _contains_direct_image(element):
+        return "eo-image"
+    if _is_scene_break(element) or _is_empty_block(element):
+        return "eo-scene-break"
+
+    text = _normalized_text(element)
+    if after_boundary and _has_works_list_heading(text.lower()):
+        return "eo-front"
+    if _is_works_category_text(text):
+        return "eo-front-section"
+    return "eo-front-list-item"
+
+
 def _has_block_children(element: etree._Element) -> bool:
     block_names = {
         "blockquote",
@@ -1062,6 +1163,10 @@ def _has_block_children(element: etree._Element) -> bool:
         "ul",
     }
     return any(etree.QName(child).localname.lower() in block_names for child in element)
+
+
+def _contains_emphasis(element: etree._Element) -> bool:
+    return bool(element.xpath(".//*[local-name()='em' or local-name()='i']"))
 
 
 def _is_front_list_item(element: etree._Element) -> bool:
@@ -1214,6 +1319,17 @@ def _is_short_heading_text(text: str) -> bool:
 def _is_short_list_text(text: str) -> bool:
     words = text.split()
     return len(text) <= 90 and len(words) <= 12
+
+
+def _is_works_category_text(text: str) -> bool:
+    words = text.split()
+    letters = [char for char in text if char.isalpha()]
+    return (
+        1 <= len(words) <= 4
+        and len(text) <= 60
+        and bool(letters)
+        and all(char.upper() == char for char in letters)
+    )
 
 
 def _is_scene_break(element: etree._Element) -> bool:
