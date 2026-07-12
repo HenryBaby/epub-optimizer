@@ -461,18 +461,41 @@ def _namespaced_tag(element: etree._Element, local_name: str) -> str:
 def _refine_document_role(root: etree._Element, document_role: str) -> str:
     if document_role in {"part", "title", "toc", "works"}:
         return document_role
+    if document_role == "prologue" and _looks_like_narrative_prologue(root):
+        return "body"
     if _looks_like_works_list_document(root):
         return "works"
     return document_role
 
 
+def _looks_like_narrative_prologue(root: etree._Element) -> bool:
+    body_blocks = _meaningful_body_blocks(root)
+    if len(body_blocks) < 3:
+        return False
+
+    heading_text = _normalized_text(body_blocks[0]).lower()
+    if "prologue" not in heading_text:
+        return False
+
+    paragraph_texts = [
+        _normalized_text(element)
+        for element in body_blocks[1:]
+        if etree.QName(element).localname.lower() in {"div", "p"}
+    ]
+    if len(paragraph_texts) < 2:
+        return False
+
+    long_paragraphs = sum(1 for text in paragraph_texts if len(text) > 180)
+    short_paragraphs = sum(1 for text in paragraph_texts if _is_short_list_text(text))
+    return long_paragraphs >= 2 and long_paragraphs > short_paragraphs
+
+
 def _looks_like_works_list_document(root: etree._Element) -> bool:
     blocks = [
         element
-        for element in root.xpath("//*[local-name()='body']//*[self::*]")
+        for element in _meaningful_body_blocks(root)
         if etree.QName(element).localname.lower() in {"div", "h1", "h2", "h3", "p"}
         and not _has_block_children(element)
-        and _normalized_text(element)
     ]
     if len(blocks) < 4:
         return False
@@ -486,6 +509,15 @@ def _looks_like_works_list_document(root: etree._Element) -> bool:
     emphasized_count = sum(1 for element in blocks[:80] if _contains_emphasis(element))
     category_count = sum(1 for text in texts if _is_works_category_text(text))
     return short_count / len(texts) >= 0.65 and (emphasized_count >= 3 or category_count >= 1)
+
+
+def _meaningful_body_blocks(root: etree._Element) -> list[etree._Element]:
+    return [
+        element
+        for element in root.xpath("//*[local-name()='body']//*[self::*]")
+        if etree.QName(element).localname.lower() in {"div", "h1", "h2", "h3", "p"}
+        and _normalized_text(element)
+    ]
 
 
 def _has_works_list_heading(text: str) -> bool:
@@ -1413,6 +1445,8 @@ def _document_role(item: etree._Element) -> str:
         return "title"
     if "title" in values and not any(hint in values for hint in ("subtitle", "entitle")):
         return "title"
+    if "prologue" in values:
+        return "prologue"
     if any(hint in values for hint in FRONT_MATTER_HINTS):
         if "toc" in values or "contents" in values:
             return "toc"

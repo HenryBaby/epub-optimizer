@@ -159,6 +159,22 @@ def test_optimize_opening_epigraph_resets_first_body_paragraph(tmp_path: Path) -
     assert '<p class="eo-body">The following paragraph continues the same scene.</p>' in chapter
 
 
+def test_optimize_narrative_prologue_uses_body_flow(tmp_path: Path) -> None:
+    source = tmp_path / "prologue.epub"
+    _write_narrative_prologue_epub(source)
+
+    result = optimize_epub(source, tmp_path / "out-prologue")
+
+    with zipfile.ZipFile(result.output_path) as archive:
+        prologue = archive.read("OEBPS/prologue.xhtml").decode("utf-8")
+
+    assert '<h1 class="eo-chapter">PROLOGUE</h1>' in prologue
+    assert '<p class="eo-extract"><i>Excerpt from an archival speech:</i></p>' in prologue
+    assert '<p class="eo-first">This is the first prose paragraph' in prologue
+    assert '<p class="eo-body">This is the second prose paragraph' in prologue
+    assert "eo-front-body" not in prologue
+
+
 def test_optimize_part_pages_images_empty_blocks_and_ncx(tmp_path: Path) -> None:
     source = tmp_path / "structure.epub"
     _write_structure_cleanup_epub(source)
@@ -590,6 +606,60 @@ def _write_opening_epigraph_epub(path: Path) -> None:
     <p><b>--The Stolen Journals</b></p>
     <p>The first narrative paragraph starts here.</p>
     <p>The following paragraph continues the same scene.</p>
+  </body>
+</html>
+""",
+        )
+
+
+def _write_narrative_prologue_epub(path: Path) -> None:
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr(
+            "mimetype",
+            "application/epub+zip",
+            compress_type=zipfile.ZIP_STORED,
+        )
+        archive.writestr(
+            "META-INF/container.xml",
+            """<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>
+""",
+        )
+        archive.writestr(
+            "content.opf",
+            """<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="id" version="3.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="id">urn:test-prologue</dc:identifier>
+    <dc:title>Prologue Test</dc:title>
+    <dc:language>en</dc:language>
+  </metadata>
+  <manifest>
+    <item id="prologue" href="OEBPS/prologue.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="prologue"/>
+  </spine>
+</package>
+""",
+        )
+        archive.writestr(
+            "OEBPS/prologue.xhtml",
+            """<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head><title>Prologue Test</title></head>
+  <body>
+    <h1>PROLOGUE</h1>
+    <p><i>Excerpt from an archival speech:</i></p>
+    <p>This is the first prose paragraph in a narrative prologue. It is long enough
+    to look like body text rather than a short front-matter note, and it should use
+    the same paragraph flow rules as a chapter opening after the epigraph.</p>
+    <p>This is the second prose paragraph in that same prologue. It should continue
+    the same context as body text and should not be classified as front matter.</p>
   </body>
 </html>
 """,
