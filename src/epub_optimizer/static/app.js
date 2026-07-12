@@ -1,8 +1,7 @@
 const form = document.querySelector("#optimizer-form");
 const fileInput = document.querySelector("#files");
+const dropzone = document.querySelector(".dropzone");
 const sourcePicker = document.querySelector("#source-picker");
-const sourceMenu = document.querySelector("#source-menu");
-const chooseFiles = document.querySelector("#choose-files");
 const chooseFolder = document.querySelector("#choose-folder");
 const button = document.querySelector("#optimize-button");
 const statusTitle = document.querySelector("#status-title");
@@ -44,17 +43,34 @@ themeToggle.addEventListener("change", () => {
 
 fileInput.addEventListener("change", updateFileSummary);
 
-sourcePicker.addEventListener("click", () => {
-  sourceMenu.hidden = !sourceMenu.hidden;
+for (const eventName of ["dragenter", "dragover"]) {
+  dropzone.addEventListener(eventName, (event) => {
+    event.preventDefault();
+    dropzone.classList.add("dropzone-active");
+  });
+}
+
+dropzone.addEventListener("dragleave", (event) => {
+  if (!dropzone.contains(event.relatedTarget)) {
+    dropzone.classList.remove("dropzone-active");
+  }
 });
 
-chooseFiles.addEventListener("click", () => {
-  sourceMenu.hidden = true;
+dropzone.addEventListener("drop", async (event) => {
+  event.preventDefault();
+  dropzone.classList.remove("dropzone-active");
+
+  selectedFiles = await epubFilesFromDataTransfer(event.dataTransfer);
+  selectionMade = true;
+  fileInput.value = "";
+  updateFileSummary();
+});
+
+sourcePicker.addEventListener("click", () => {
   fileInput.click();
 });
 
 chooseFolder.addEventListener("click", async () => {
-  sourceMenu.hidden = true;
   if (!window.showDirectoryPicker) {
     setStatus("Folder picker unavailable", "Use a Chromium-based browser to select folders.");
     return;
@@ -70,12 +86,6 @@ chooseFolder.addEventListener("click", async () => {
     if (!(error instanceof DOMException && error.name === "AbortError")) {
       setStatus("Folder selection failed", "The folder could not be read.");
     }
-  }
-});
-
-document.addEventListener("click", (event) => {
-  if (!sourceMenu.hidden && !event.target.closest(".picker-wrap")) {
-    sourceMenu.hidden = true;
   }
 });
 
@@ -397,7 +407,6 @@ function setBusy(isBusy) {
   button.disabled = isBusy;
   fileInput.disabled = isBusy;
   sourcePicker.disabled = isBusy;
-  chooseFiles.disabled = isBusy;
   chooseFolder.disabled = isBusy;
   button.textContent = isBusy ? "Optimizing..." : "Optimize EPUB";
 }
@@ -442,6 +451,58 @@ async function collectEpubFiles(directory, files) {
       await collectEpubFiles(entry, files);
     }
   }
+}
+
+async function epubFilesFromDataTransfer(dataTransfer) {
+  const files = [];
+  const items = Array.from(dataTransfer.items || []);
+
+  if (items.length > 0 && items.some((item) => "webkitGetAsEntry" in item)) {
+    for (const item of items) {
+      const entry = item.webkitGetAsEntry();
+      if (entry) {
+        await collectEpubFilesFromEntry(entry, files);
+      }
+    }
+  } else {
+    files.push(...Array.from(dataTransfer.files || []).filter(isEpubFile));
+  }
+
+  return files.sort((first, second) => first.name.localeCompare(second.name));
+}
+
+async function collectEpubFilesFromEntry(entry, files) {
+  if (entry.isFile && entry.name.toLowerCase().endsWith(".epub")) {
+    files.push(await fileFromEntry(entry));
+    return;
+  }
+
+  if (!entry.isDirectory) {
+    return;
+  }
+
+  const reader = entry.createReader();
+  while (true) {
+    const entries = await readDirectoryEntries(reader);
+    if (entries.length === 0) {
+      break;
+    }
+    for (const child of entries) {
+      await collectEpubFilesFromEntry(child, files);
+    }
+  }
+}
+
+function fileFromEntry(entry) {
+  return new Promise((resolve, reject) => {
+    entry.file(resolve, reject);
+  });
+}
+
+function readDirectoryEntries(reader) {
+  return new Promise((resolve, reject) => {
+    reader.readEntries(resolve, reject);
+  });
 }
 
 function isEpubFile(file) {

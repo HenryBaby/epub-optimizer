@@ -35,18 +35,19 @@
           </div>
 
           <form id="optimizer-form" action="/optimize" method="post" enctype="multipart/form-data">
-            <div class="picker-wrap">
-              <button id="source-picker" class="dropzone" type="button">
+            <div class="dropzone">
+              <button
+                id="source-picker"
+                class="dropzone-main"
+                type="button"
+              >
                 <span class="dropzone-icon" aria-hidden="true">+</span>
                 <span>
-                  <strong>Select EPUB files or a folder</strong>
+                  <strong>Select EPUB files or drop a folder</strong>
                   <small id="file-summary">No files selected</small>
                 </span>
               </button>
-              <div id="source-menu" class="picker-menu" hidden>
-                <button id="choose-files" type="button">Choose EPUB files</button>
-                <button id="choose-folder" type="button">Choose folder</button>
-              </div>
+              <button id="choose-folder" class="folder-link" type="button">Choose folder</button>
             </div>
             <input
               id="files"

@@ -267,10 +267,6 @@ form {
   gap: 16px;
 }
 
-.picker-wrap {
-  position: relative;
-}
-
 .file-input {
   position: absolute;
   inline-size: 1px;
@@ -280,49 +276,68 @@ form {
 }
 
 .dropzone {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  min-height: 146px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-strong) 86%, var(--surface));
+  transition:
+    border-color 160ms ease,
+    background 160ms ease;
+}
+
+.dropzone-main {
   display: grid;
   width: 100%;
   grid-template-columns: 44px minmax(0, 1fr);
   gap: 14px;
   align-items: center;
-  min-height: 146px;
-  border: 1px dashed var(--border-strong);
-  border-radius: 8px;
+  border: 0;
+  border-radius: inherit;
   padding: 18px;
-  background: var(--surface-strong);
+  background: transparent;
   color: var(--text);
   font: inherit;
   text-align: left;
   cursor: pointer;
-  transition:
-    border-color 160ms ease,
-    transform 160ms ease,
-    background 160ms ease;
 }
 
-.picker-menu {
+.folder-link {
   position: absolute;
-  z-index: 10;
-  left: 18px;
-  bottom: 18px;
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 8px;
-  background: var(--surface);
-  box-shadow: var(--shadow);
+  inline-size: 1px;
+  block-size: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
 }
 
-.picker-menu[hidden] {
-  display: none;
-}
-
-.dropzone:hover {
+.dropzone:hover,
+.dropzone:focus-within {
   border-color: var(--magenta);
-  background: color-mix(in srgb, var(--accent-soft) 58%, var(--surface));
-  transform: translateY(-1px);
+  background: color-mix(in srgb, var(--accent-soft) 82%, var(--surface));
+}
+
+.dropzone-active {
+  border-color: var(--magenta);
+  background: color-mix(in srgb, var(--accent-soft) 88%, var(--surface));
+}
+
+.folder-link:focus-visible {
+  right: 14px;
+  bottom: 12px;
+  inline-size: auto;
+  block-size: auto;
+  overflow: visible;
+  clip: auto;
+  min-height: 0;
+  border: 0;
+  border-radius: 6px;
+  padding: 4px 6px;
+  background: color-mix(in srgb, var(--accent-soft) 70%, transparent);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .dropzone-icon {
@@ -371,7 +386,7 @@ form {
   overflow-wrap: anywhere;
 }
 
-button:not(.dropzone),
+button:not(.dropzone-main):not(.folder-link),
 .button {
   display: inline-flex;
   align-items: center;
@@ -392,7 +407,7 @@ button:not(.dropzone),
     transform 160ms ease;
 }
 
-button:hover,
+button:not(.dropzone-main):not(.folder-link):hover,
 .button:hover {
   background: var(--accent-strong);
   transform: translateY(-1px);
