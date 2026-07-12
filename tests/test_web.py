@@ -14,7 +14,7 @@ def test_homepage_renders() -> None:
 
     assert response.status_code == 200
     assert "EPUB Optimizer" in response.text
-    assert "v0.1.28" in response.text
+    assert "v0.1.29" in response.text
     assert 'id="optimizer-form"' in response.text
     assert 'name="files"' in response.text
     assert "multiple" in response.text
