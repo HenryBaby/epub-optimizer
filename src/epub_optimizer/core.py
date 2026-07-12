@@ -591,7 +591,8 @@ def _rename_element(element: etree._Element, local_name: str) -> None:
 
 def _classify_blocks(root: etree._Element, document_role: str) -> None:
     after_boundary = True
-    is_front_matter = document_role == "front"
+    is_front_matter = document_role in {"front", "title"}
+    title_line_index = 0
     for element in root.xpath("//*[local-name()='body']//*[self::*]"):
         local = etree.QName(element).localname.lower()
         source_classes = set(element.attrib.get("class", "").lower().split())
@@ -600,6 +601,12 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
             if document_role == "toc":
                 _replace_classes(element, "eo-toc-heading")
                 after_boundary = True
+                continue
+            if document_role == "title":
+                role = _title_page_line_role(element, title_line_index)
+                title_line_index += 1
+                _replace_classes(element, role)
+                after_boundary = role in {"eo-title-main", "eo-title-author"}
                 continue
             _replace_classes(element, _heading_role(local, source_classes, is_front_matter))
             after_boundary = True
@@ -640,6 +647,14 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
                 _replace_classes(element, role)
                 after_boundary = role in {"eo-image", "eo-part", "eo-scene-break"}
                 continue
+            if document_role == "title":
+                role = _title_page_line_role(element, title_line_index)
+                title_line_index += 1
+                if role == "eo-title-main":
+                    _rename_element(element, "h1")
+                _replace_classes(element, role)
+                after_boundary = role in {"eo-image", "eo-title-main", "eo-title-author"}
+                continue
             role = _paragraph_role(element, source_classes, after_boundary, is_front_matter)
             _replace_classes(element, role)
             after_boundary = role in {
@@ -657,6 +672,10 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
         if local == "div" and _is_direct_body_child(element):
             if document_role == "toc":
                 role = _toc_block_role(element, source_classes, after_boundary)
+            elif document_role == "title":
+                role = _title_div_role(element, title_line_index)
+                if role != "eo-title-page":
+                    title_line_index += 1
             else:
                 container_role = _container_role(source_classes)
                 role = container_role or _anonymous_div_role(element, after_boundary, document_role)
@@ -666,6 +685,7 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
                     "eo-front",
                     "eo-part",
                     "eo-section",
+                    "eo-title-main",
                     "eo-toc-heading",
                 }:
                     _rename_element(element, "h1")
@@ -687,6 +707,10 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
                         "eo-image",
                         "eo-poetry",
                         "eo-scene-break",
+                        "eo-title-author",
+                        "eo-title-credit",
+                        "eo-title-credit-label",
+                        "eo-title-publisher",
                         "eo-toc-entry",
                         "eo-toc-chapter",
                         "eo-toc-part",
@@ -708,6 +732,34 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
                     _rename_element(element, "p")
                     _replace_classes(element, role)
                     after_boundary = role in {"eo-front-list-item", "eo-scene-break", "eo-image"}
+                continue
+
+        if local == "div" and document_role == "title":
+            role = _title_div_role(element, title_line_index)
+            if role == "eo-title-page":
+                _replace_classes(element, role)
+                after_boundary = True
+                continue
+            title_line_index += 1
+            if role == "eo-title-main":
+                _rename_element(element, "h1")
+                _replace_classes(element, role)
+                after_boundary = True
+                continue
+            if role:
+                if _has_block_children(element):
+                    _replace_classes(element, role)
+                    after_boundary = True
+                    continue
+                _rename_element(element, "p")
+                _replace_classes(element, role)
+                after_boundary = role in {
+                    "eo-image",
+                    "eo-title-author",
+                    "eo-title-main",
+                    "eo-title-publisher",
+                    "eo-scene-break",
+                }
                 continue
 
         if local == "div" and document_role == "toc":
@@ -810,6 +862,99 @@ def _part_paragraph_role(element: etree._Element, after_boundary: bool) -> str:
     if after_boundary and _is_short_heading_text(text):
         return "eo-part"
     return "eo-first" if after_boundary else "eo-body"
+
+
+def _title_div_role(element: etree._Element, line_index: int) -> str:
+    if _has_block_children(element):
+        return "eo-title-page"
+    return _title_page_line_role(element, line_index)
+
+
+def _title_page_line_role(element: etree._Element, line_index: int) -> str:
+    if _contains_direct_image(element):
+        return "eo-image"
+    if _is_scene_break(element):
+        return "eo-scene-break"
+
+    text = _normalized_text(element)
+    if not text:
+        return "eo-scene-break"
+    lower_text = text.lower()
+    if line_index == 0:
+        return "eo-title-main"
+    if _is_title_credit_label(lower_text):
+        return "eo-title-credit-label"
+    if _contains_credit_label_before(element) and line_index <= 2:
+        return "eo-title-credit"
+    if _is_title_publisher_line(text, lower_text, line_index):
+        return "eo-title-publisher"
+    if _looks_like_person_credit(text):
+        return "eo-title-author"
+    return "eo-title-credit" if line_index <= 2 else "eo-title-author"
+
+
+def _is_title_credit_label(lower_text: str) -> bool:
+    if len(lower_text) > 80:
+        return False
+    if " by" in lower_text or "by " in lower_text or " from " in lower_text:
+        return True
+    return lower_text.startswith(
+        (
+            "adapted ",
+            "afterword ",
+            "edited ",
+            "illustrated ",
+            "introduction ",
+            "translated ",
+            "with ",
+        )
+    )
+
+
+def _is_title_publisher_line(text: str, lower_text: str, line_index: int) -> bool:
+    publisher_tokens = {
+        "books",
+        "classics",
+        "edition",
+        "editions",
+        "house",
+        "imprint",
+        "press",
+        "publishers",
+        "publishing",
+    }
+    if any(token in lower_text for token in publisher_tokens):
+        return True
+    words = text.replace("/", " ").split()
+    return (
+        line_index >= 4
+        and 1 <= len(words) <= 4
+        and bool(words)
+        and all(word[:1].isupper() for word in words)
+    )
+
+
+def _looks_like_person_credit(text: str) -> bool:
+    words = [word.strip(".,;:") for word in text.split()]
+    if not 1 <= len(words) <= 5:
+        return False
+    alpha_words = [word for word in words if any(char.isalpha() for char in word)]
+    return bool(alpha_words) and all(word[:1].isupper() for word in alpha_words)
+
+
+def _contains_credit_label_before(element: etree._Element) -> bool:
+    parent = element.getparent()
+    if parent is None:
+        return False
+    for sibling in parent:
+        if sibling is element:
+            return False
+        if not isinstance(sibling.tag, str):
+            continue
+        text = _normalized_text(sibling).lower()
+        if text and _is_title_credit_label(text):
+            return True
+    return False
 
 
 def _container_role(classes: set[str]) -> str | None:
@@ -1087,6 +1232,10 @@ def _document_role(item: etree._Element) -> str:
             " ".join(properties),
         ]
     ).lower()
+    if any(hint in values for hint in ("titlepage", "title-page", "title_page")):
+        return "title"
+    if "title" in values and not any(hint in values for hint in ("subtitle", "entitle")):
+        return "title"
     if any(hint in values for hint in FRONT_MATTER_HINTS):
         if "toc" in values or "contents" in values:
             return "toc"

@@ -103,6 +103,25 @@ def test_optimize_toc_entries(tmp_path: Path) -> None:
     assert '<p class="eo-toc"' not in toc
 
 
+def test_optimize_title_page_layout_roles(tmp_path: Path) -> None:
+    source = tmp_path / "title.epub"
+    _write_title_page_epub(source)
+
+    result = optimize_epub(source, tmp_path / "out-title")
+
+    with zipfile.ZipFile(result.output_path) as archive:
+        title = archive.read("OEBPS/title.xhtml").decode("utf-8")
+        css = archive.read("Styles/epub-optimizer.css").decode("utf-8")
+
+    assert '<div class="eo-title-page">' in title
+    assert '<h1 class="eo-title-main">BOOK TITLE</h1>' in title
+    assert '<p class="eo-title-credit-label">TRANSLATED FROM THE ORIGINAL BY</p>' in title
+    assert '<p class="eo-title-credit">Translator Name</p>' in title
+    assert '<p class="eo-title-author">Author Name</p>' in title
+    assert '<p class="eo-title-publisher">PUBLISHER BOOKS<br/>City</p>' in title
+    assert "eo-title-main" in css
+
+
 def test_optimize_part_pages_images_empty_blocks_and_ncx(tmp_path: Path) -> None:
     source = tmp_path / "structure.epub"
     _write_structure_cleanup_epub(source)
@@ -375,6 +394,60 @@ def _write_toc_epub(path: Path) -> None:
 <html xmlns="http://www.w3.org/1999/xhtml">
   <head><title>TOC Test</title></head>
   <body><p>Body.</p></body>
+</html>
+""",
+        )
+
+
+def _write_title_page_epub(path: Path) -> None:
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr(
+            "mimetype",
+            "application/epub+zip",
+            compress_type=zipfile.ZIP_STORED,
+        )
+        archive.writestr(
+            "META-INF/container.xml",
+            """<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>
+""",
+        )
+        archive.writestr(
+            "content.opf",
+            """<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="id" version="3.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="id">urn:test-title</dc:identifier>
+    <dc:title>Title Test</dc:title>
+    <dc:language>en</dc:language>
+  </metadata>
+  <manifest>
+    <item id="titlepage" href="OEBPS/title.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="titlepage"/>
+  </spine>
+</package>
+""",
+        )
+        archive.writestr(
+            "OEBPS/title.xhtml",
+            """<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head><title>Title Test</title></head>
+  <body>
+    <div>
+      <p>BOOK TITLE</p>
+      <p>TRANSLATED FROM THE ORIGINAL BY</p>
+      <p>Translator Name</p>
+      <p>Author Name</p>
+      <p>PUBLISHER BOOKS<br/>City</p>
+    </div>
+  </body>
 </html>
 """,
         )

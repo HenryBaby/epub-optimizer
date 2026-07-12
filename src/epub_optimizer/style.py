@@ -116,6 +116,55 @@ div.eo-right {
   text-align: center;
 }
 
+.eo-title-page {
+  margin: 18% 0 0;
+  text-align: center;
+}
+
+h1.eo-title-main,
+p.eo-title-main {
+  margin: 0 0 2.5em;
+  font-size: 1.6em;
+  line-height: 1.25;
+  font-weight: bold;
+  text-align: center;
+  text-indent: 0;
+  letter-spacing: 0;
+}
+
+p.eo-title-credit-label {
+  margin: 0 0 0.6em;
+  font-size: 0.85em;
+  line-height: 1.3;
+  text-align: center;
+  text-indent: 0;
+  text-transform: uppercase;
+}
+
+p.eo-title-credit {
+  margin: 0 0 2.5em;
+  font-size: 1.15em;
+  line-height: 1.3;
+  text-align: center;
+  text-indent: 0;
+}
+
+p.eo-title-author {
+  margin: 3em 0 5em;
+  font-size: 1.25em;
+  line-height: 1.3;
+  text-align: center;
+  text-indent: 0;
+}
+
+p.eo-title-publisher {
+  margin: 0.2em 0;
+  font-size: 0.85em;
+  line-height: 1.25;
+  text-align: center;
+  text-indent: 0;
+}
+
 .eo-toc {
   margin: 1em 0;
   text-align: center;

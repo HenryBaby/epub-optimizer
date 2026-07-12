@@ -14,7 +14,7 @@ def test_homepage_renders() -> None:
 
     assert response.status_code == 200
     assert "EPUB Optimizer" in response.text
-    assert "v0.1.15" in response.text
+    assert "v0.1.16" in response.text
 
 
 def test_download_link_handles_url_significant_filename_chars(tmp_path, monkeypatch) -> None:
