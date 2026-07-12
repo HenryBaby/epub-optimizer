@@ -504,10 +504,10 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
             continue
 
         if local == "div" and _is_direct_body_child(element):
-            container_role = _container_role(source_classes)
             if document_role == "toc":
-                role = container_role or _toc_entry_role(element, source_classes, after_boundary)
+                role = _toc_block_role(element, source_classes, after_boundary)
             else:
+                container_role = _container_role(source_classes)
                 role = container_role or _anonymous_div_role(element, after_boundary, document_role)
             if role:
                 if role in {
@@ -559,13 +559,12 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
                 continue
 
         if local == "div" and document_role == "toc":
-            container_role = _container_role(source_classes)
-            if container_role == "eo-toc":
-                _replace_classes(element, container_role)
+            role = _toc_block_role(element, source_classes, after_boundary)
+            if role == "eo-toc":
+                _replace_classes(element, role)
                 after_boundary = True
                 continue
 
-            role = container_role or _toc_entry_role(element, source_classes, after_boundary)
             if role:
                 if role == "eo-toc-heading":
                     _rename_element(element, "h1")
@@ -665,12 +664,6 @@ def _container_role(classes: set[str]) -> str | None:
         return "eo-footnote"
     if classes & {"dedication"}:
         return "eo-dedication"
-    if classes & {"toc_part", "eo-toc-part"}:
-        return "eo-toc-part"
-    if classes & {"toc_chap", "toc_sub", "eo-toc-chapter"}:
-        return "eo-toc-chapter"
-    if classes & {"toc", "toc_fm", "toc_bm", "eo-toc"}:
-        return "eo-toc"
     if classes & {"copyright", "otherbooks", "titlepage"}:
         return "eo-centered"
     return None
@@ -789,6 +782,16 @@ def _is_front_list_item(element: etree._Element) -> bool:
     return text_count >= 3 and short_leaf_count / text_count >= 0.75
 
 
+def _toc_block_role(
+    element: etree._Element,
+    classes: set[str],
+    after_boundary: bool,
+) -> str:
+    if classes & {"toc", "toc_fm", "toc_bm", "eo-toc"} and _has_block_children(element):
+        return "eo-toc"
+    return _toc_entry_role(element, classes, after_boundary)
+
+
 def _toc_entry_role(
     element: etree._Element,
     classes: set[str],
@@ -803,9 +806,9 @@ def _toc_entry_role(
         return "eo-toc-entry"
     if after_boundary and _is_short_heading_text(text) and not _contains_link(element):
         return "eo-toc-heading"
-    if classes & {"toc_part"} or _looks_like_toc_part(element, text):
+    if classes & {"toc_part", "eo-toc-part"} or _looks_like_toc_part(element, text):
         return "eo-toc-part"
-    if classes & {"toc_chap", "toc_sub"} or _contains_chapterish_link(element):
+    if classes & {"toc_chap", "toc_sub", "eo-toc-chapter"} or _contains_chapterish_link(element):
         return "eo-toc-chapter"
     return "eo-toc-entry"
 

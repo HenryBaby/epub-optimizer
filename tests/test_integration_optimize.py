@@ -98,6 +98,8 @@ def test_optimize_toc_entries(tmp_path: Path) -> None:
     assert '<p class="eo-toc-entry"><a href="title.xhtml">Title Page</a></p>' in toc
     assert '<p class="eo-toc-part"><a href="part001.xhtml">PART ONE</a></p>' in toc
     assert '<p class="eo-toc-chapter"><a href="chapter001.xhtml">Chapter One</a></p>' in toc
+    assert '<p class="eo-toc-chapter"><a href="chapter002.xhtml">Chapter Two</a></p>' in toc
+    assert '<p class="eo-toc"' not in toc
 
 
 def _write_minimal_epub(path: Path) -> None:
@@ -335,6 +337,7 @@ def _write_toc_epub(path: Path) -> None:
       </div>
       <div class="toc_part"><a href="part001.xhtml">PART ONE</a></div>
       <div class="toc_chap"><a href="chapter001.xhtml">Chapter One</a></div>
+      <p class="toc"><a href="chapter002.xhtml">Chapter Two</a></p>
     </div>
   </body>
 </html>
