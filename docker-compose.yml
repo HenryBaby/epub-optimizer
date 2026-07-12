@@ -8,7 +8,8 @@ services:
     environment:
       EPUB_OPTIMIZER_MAX_UPLOAD_MB: "100"
     volumes:
-      - epub_optimizer_data:/data
+      - epubo_data:/data
 
 volumes:
-  epub_optimizer_data:
+  epubo_data:
+    name: epubo_data 
