@@ -10,6 +10,12 @@ COPY src ./src
 
 RUN pip install --no-cache-dir .
 
+RUN adduser --disabled-password --gecos "" appuser \
+    && mkdir -p /data \
+    && chown -R appuser:appuser /data
+
+USER appuser
+
 EXPOSE 4200
 
 CMD ["uvicorn", "epub_optimizer.web:app", "--host", "0.0.0.0", "--port", "4200"]

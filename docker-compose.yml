@@ -1,7 +1,14 @@
 services:
   epub-optimizer:
-    build: .
+    image: ${EPUB_OPTIMIZER_IMAGE:-ghcr.io/henrybaby/epub-optimizer:latest}
+    restart: unless-stopped
     ports:
-      - "4200:4200"
+      - "${EPUB_OPTIMIZER_PORT:-4200}:4200"
     environment:
-      EPUB_OPTIMIZER_MAX_UPLOAD_MB: "100"
+      EPUB_OPTIMIZER_MAX_UPLOAD_MB: "${EPUB_OPTIMIZER_MAX_UPLOAD_MB:-100}"
+      EPUB_OPTIMIZER_OUTPUT_DIR: "/data"
+    volumes:
+      - epub_optimizer_data:/data
+
+volumes:
+  epub_optimizer_data:

@@ -48,10 +48,59 @@ EPUB Optimizer intentionally does not:
 Uploaded files are treated as temporary inputs. Optimized files are kept by the
 running app container long enough to download them.
 
-## Run With Docker
+## Deploy With Docker Compose
+
+The default Compose file is designed to run the published container image from
+GitHub Container Registry.
 
 ```bash
-docker compose up --build
+docker compose pull
+docker compose up -d
+```
+
+Then open:
+
+```text
+http://localhost:4200
+```
+
+By default, Compose runs:
+
+```text
+ghcr.io/henrybaby/epub-optimizer:latest
+```
+
+If the package is private, log in to GitHub Container Registry before pulling:
+
+```bash
+echo YOUR_GITHUB_TOKEN | docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-stdin
+```
+
+You can pin a specific published version:
+
+```bash
+EPUB_OPTIMIZER_IMAGE=ghcr.io/henrybaby/epub-optimizer:0.1.31 docker compose up -d
+```
+
+Configuration is handled through environment variables:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `EPUB_OPTIMIZER_IMAGE` | `ghcr.io/henrybaby/epub-optimizer:latest` | Container image to run. |
+| `EPUB_OPTIMIZER_PORT` | `4200` | Host port for the web UI. |
+| `EPUB_OPTIMIZER_MAX_UPLOAD_MB` | `100` | Maximum upload size per EPUB. |
+
+Optimized downloads are stored in the `epub_optimizer_data` Docker volume so
+they remain available across container restarts. Uploaded source files and
+temporary extraction workspaces are still treated as temporary processing data.
+
+## Build Locally With Docker
+
+For local development or testing without pulling the published image, use the
+build override:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.build.yml up --build
 ```
 
 Then open:
@@ -63,6 +112,28 @@ http://localhost:4200
 The web UI lets you select one or more EPUB files, process them as a queue, view
 batch task progress, and download each optimized EPUB individually or all
 optimized files together as a ZIP.
+
+## Published Docker Images
+
+Docker images are built automatically by GitHub Actions.
+
+- Pull requests and pushes to `main` build the image to verify the Docker build.
+- Version tags publish the image to GitHub Container Registry.
+
+Release tags should match the Python package version:
+
+```text
+pyproject.toml version = 0.1.31
+git tag v0.1.31
+git push origin v0.1.31
+```
+
+Publishing a matching `vX.Y.Z` tag creates exactly two image tags:
+
+```text
+ghcr.io/henrybaby/epub-optimizer:X.Y.Z
+ghcr.io/henrybaby/epub-optimizer:latest
+```
 
 ## Local Development
 

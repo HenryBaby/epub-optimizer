@@ -1,0 +1,5 @@
+services:
+  epub-optimizer:
+    build:
+      context: .
+    image: epub-optimizer:local
