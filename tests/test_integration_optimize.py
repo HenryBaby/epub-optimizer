@@ -81,7 +81,8 @@ def test_optimize_front_matter_nested_divs_and_empty_breaks(tmp_path: Path) -> N
     assert '<p class="eo-front-list-item"><i>First Book</i></p>' in front
     assert '<p class="eo-front-list-item"><i>Second Book</i></p>' in front
     assert '<span class="eo-smallcaps">ITIES</span>' in chapter
-    assert '<p class="eo-scene-break"/>' in chapter or '<p class="eo-scene-break"></p>' in chapter
+    assert "eo-scene-break" not in chapter
+    assert '<p class="eo-first">First body paragraph.</p>' in chapter
 
 
 def test_optimize_toc_entries(tmp_path: Path) -> None:
@@ -100,6 +101,28 @@ def test_optimize_toc_entries(tmp_path: Path) -> None:
     assert '<p class="eo-toc-chapter"><a href="chapter001.xhtml">Chapter One</a></p>' in toc
     assert '<p class="eo-toc-chapter"><a href="chapter002.xhtml">Chapter Two</a></p>' in toc
     assert '<p class="eo-toc"' not in toc
+
+
+def test_optimize_part_pages_images_empty_blocks_and_ncx(tmp_path: Path) -> None:
+    source = tmp_path / "structure.epub"
+    _write_structure_cleanup_epub(source)
+
+    result = optimize_epub(source, tmp_path / "out-structure")
+
+    with zipfile.ZipFile(result.output_path) as archive:
+        part = archive.read("OEBPS/part001.xhtml").decode("utf-8")
+        ncx = archive.read("toc.ncx").decode("utf-8")
+
+    assert '<h1 class="eo-part">PART ONE</h1>' in part
+    assert "missing.jpg" not in part
+    assert "<p/>" not in part
+    assert "<div/>" not in part
+    assert "  Part One  " not in ncx
+    assert ">Part One<" in ncx
+    assert "missing.xhtml" not in ncx
+    assert "javascript:" not in ncx
+    assert ncx.count("<navPoint") == 1
+    assert 'playOrder="1"' in ncx
 
 
 def _write_minimal_epub(path: Path) -> None:
@@ -314,7 +337,10 @@ def _write_toc_epub(path: Path) -> None:
     <dc:language>en</dc:language>
   </metadata>
   <manifest>
-    <item id="contents" href="OEBPS/contents.xhtml" media-type="application/xhtml+xml"/>
+    <item id="contents"
+          href="OEBPS/contents.xhtml"
+          media-type="application/xhtml+xml"
+          properties="nav"/>
     <item id="chapter001" href="OEBPS/chapter001.xhtml" media-type="application/xhtml+xml"/>
   </manifest>
   <spine>
@@ -350,5 +376,80 @@ def _write_toc_epub(path: Path) -> None:
   <head><title>TOC Test</title></head>
   <body><p>Body.</p></body>
 </html>
+""",
+        )
+
+
+def _write_structure_cleanup_epub(path: Path) -> None:
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr(
+            "mimetype",
+            "application/epub+zip",
+            compress_type=zipfile.ZIP_STORED,
+        )
+        archive.writestr(
+            "META-INF/container.xml",
+            """<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>
+""",
+        )
+        archive.writestr(
+            "content.opf",
+            """<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="id" version="2.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="id">urn:test-structure</dc:identifier>
+    <dc:title>Structure Test</dc:title>
+    <dc:language>en</dc:language>
+  </metadata>
+  <manifest>
+    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+    <item id="part001" href="OEBPS/part001.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine toc="ncx">
+    <itemref idref="part001"/>
+  </spine>
+</package>
+""",
+        )
+        archive.writestr(
+            "OEBPS/part001.xhtml",
+            """<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head><title>Structure Test</title></head>
+  <body>
+    <p><img alt="image.missing" src="missing.jpg"/></p>
+    <p/>
+    <div/>
+    <p>PART ONE</p>
+  </body>
+</html>
+""",
+        )
+        archive.writestr(
+            "toc.ncx",
+            """<?xml version="1.0" encoding="utf-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+  <head/>
+  <docTitle><text>Structure Test</text></docTitle>
+  <navMap>
+    <navPoint id="nav1" playOrder="9">
+      <navLabel><text>  Part One  </text></navLabel>
+      <content src="OEBPS/part001.xhtml"/>
+    </navPoint>
+    <navPoint id="nav2" playOrder="10">
+      <navLabel><text>Missing</text></navLabel>
+      <content src="OEBPS/missing.xhtml"/>
+    </navPoint>
+    <navPoint id="nav3" playOrder="11">
+      <navLabel><text>Unsafe</text></navLabel>
+      <content src="javascript:alert(1)"/>
+    </navPoint>
+  </navMap>
+</ncx>
 """,
         )

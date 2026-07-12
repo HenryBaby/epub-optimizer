@@ -4,6 +4,7 @@ import posixpath
 import tempfile
 import time
 from pathlib import Path, PurePosixPath
+from urllib.parse import unquote, urlsplit
 
 from lxml import etree
 
@@ -169,9 +170,14 @@ def optimize_epub(
                 content_file,
                 content_package_path,
                 canonical_css_package_href,
+                work_dir,
                 _document_role(item),
             ):
                 processed_docs += 1
+
+        normalized_nav = _normalize_navigation_documents(work_dir, package_dir, items)
+        if normalized_nav:
+            log.append(f"Normalized {normalized_nav} navigation document(s).")
 
         log.append(f"Processed {processed_docs} content document(s).")
         _write_xml(package_tree, package_file)
@@ -199,6 +205,8 @@ def optimize_epub(
 def optimized_filename(filename: str) -> str:
     path = Path(filename)
     stem = path.stem or "optimized"
+    if stem.lower().endswith("-optimized"):
+        stem = stem[: -len("-optimized")] or "optimized"
     suffix = path.suffix if path.suffix.lower() == ".epub" else ".epub"
     return f"{stem}-optimized{suffix}"
 
@@ -323,6 +331,7 @@ def _process_content_document(
     content_file: Path,
     content_package_path: str,
     canonical_css_package_href: str,
+    work_dir: Path,
     document_role: str,
 ) -> bool:
     parser = etree.XMLParser(resolve_entities=False, no_network=True, recover=True)
@@ -337,12 +346,86 @@ def _process_content_document(
 
     _sanitize_links(root)
     _strip_publisher_presentation(root)
+    _remove_broken_images(root, content_file, work_dir)
     _unwrap_font_elements(root)
     _normalize_inline_spans(root)
+    _remove_empty_blocks(root)
     _classify_blocks(root, document_role)
     _strip_unclassified_classes(root)
     _write_xml(tree, content_file)
     return True
+
+
+def _normalize_navigation_documents(
+    work_dir: Path,
+    package_dir: str,
+    items: list[etree._Element],
+) -> int:
+    normalized = 0
+    for item in items:
+        href = item.attrib.get("href")
+        if not href:
+            continue
+        media_type = item.attrib.get("media-type", "").lower()
+        if media_type != "application/x-dtbncx+xml":
+            continue
+        nav_package_path = _join_package_path(package_dir, href)
+        nav_file = work_dir / Path(*PurePosixPath(nav_package_path).parts)
+        if not nav_file.is_file():
+            continue
+        if _normalize_ncx_document(nav_file, work_dir, posixpath.dirname(nav_package_path)):
+            normalized += 1
+    return normalized
+
+
+def _normalize_ncx_document(nav_file: Path, work_dir: Path, nav_dir: str) -> bool:
+    parser = etree.XMLParser(resolve_entities=False, no_network=True, recover=True)
+    tree = etree.parse(str(nav_file), parser)
+    root = tree.getroot()
+    changed = False
+
+    for nav_point in list(root.xpath("//*[local-name()='navPoint']")):
+        label = _first_xpath(nav_point, "./*[local-name()='navLabel']/*[local-name()='text']")
+        content = _first_xpath(nav_point, "./*[local-name()='content']")
+        src = content.attrib.get("src") if content is not None else ""
+        if not src or _is_dangerous_or_missing_nav_target(src, work_dir, nav_dir):
+            parent = nav_point.getparent()
+            if parent is not None:
+                parent.remove(nav_point)
+                changed = True
+            continue
+
+        if label is not None:
+            normalized = _normalized_text(label)
+            if label.text != normalized:
+                label.text = normalized
+                changed = True
+
+    for index, nav_point in enumerate(root.xpath("//*[local-name()='navPoint']"), start=1):
+        new_order = str(index)
+        if nav_point.attrib.get("playOrder") != new_order:
+            nav_point.attrib["playOrder"] = new_order
+            changed = True
+
+    if changed:
+        _write_xml(tree, nav_file)
+    return changed
+
+
+def _is_dangerous_or_missing_nav_target(src: str, work_dir: Path, nav_dir: str) -> bool:
+    parsed = urlsplit(src)
+    if parsed.scheme in DANGEROUS_URI_SCHEMES:
+        return True
+    if parsed.scheme or parsed.netloc:
+        return False
+    path = unquote(parsed.path)
+    if not path:
+        return True
+    normalized = posixpath.normpath(posixpath.join(nav_dir, path))
+    if normalized.startswith("../") or normalized == ".." or normalized.startswith("/"):
+        return True
+    target = work_dir / Path(*PurePosixPath(normalized).parts)
+    return not target.is_file()
 
 
 def _first_xpath(root: etree._Element, query: str) -> etree._Element | None:
@@ -383,6 +466,67 @@ def _sanitize_links(root: etree._Element) -> None:
             scheme = value.split(":", 1)[0].lower() if ":" in value else ""
             if scheme in DANGEROUS_URI_SCHEMES:
                 del element.attrib[attr]
+
+
+def _remove_broken_images(root: etree._Element, content_file: Path, work_dir: Path) -> None:
+    for image in list(root.xpath("//*[local-name()='img']")):
+        src = image.attrib.get("src")
+        if not src:
+            _remove_element_preserving_tail(image)
+            continue
+        asset_path = _resolve_content_asset_path(content_file, work_dir, src)
+        if asset_path is not None and not asset_path.is_file():
+            _remove_element_preserving_tail(image)
+
+    image_containers = "//*[local-name()='p' or local-name()='div' or local-name()='figure']"
+    for element in list(root.xpath(image_containers)):
+        classes = set(element.attrib.get("class", "").lower().split())
+        if classes & {"eo-image", "image", "img", "dis_img", "cover"} and _is_empty_block(element):
+            _remove_element_preserving_tail(element)
+
+
+def _resolve_content_asset_path(content_file: Path, work_dir: Path, href: str) -> Path | None:
+    parsed = urlsplit(href)
+    if parsed.scheme or parsed.netloc:
+        return None
+    path = unquote(parsed.path)
+    if not path:
+        return None
+    normalized = posixpath.normpath(posixpath.join(content_file.parent.as_posix(), path))
+    candidate = Path(normalized).resolve()
+    try:
+        candidate.relative_to(work_dir.resolve())
+    except ValueError:
+        return None
+    return candidate
+
+
+def _remove_empty_blocks(root: etree._Element) -> None:
+    removable_names = {"div", "p", "section"}
+    empty_blocks = "//*[local-name()='div' or local-name()='p' or local-name()='section']"
+    for element in list(root.xpath(empty_blocks)):
+        if etree.QName(element).localname.lower() not in removable_names:
+            continue
+        if not _is_empty_block(element):
+            continue
+        classes = set(element.attrib.get("class", "").lower().split())
+        if classes & {"scene-break", "scenebreak", "separator", "ornament", "space-break"}:
+            continue
+        _remove_element_preserving_tail(element)
+
+
+def _remove_element_preserving_tail(element: etree._Element) -> None:
+    parent = element.getparent()
+    if parent is None:
+        return
+    tail = element.tail
+    previous = element.getprevious()
+    if tail:
+        if previous is not None:
+            previous.tail = (previous.tail or "") + tail
+        else:
+            parent.text = (parent.text or "") + tail
+    parent.remove(element)
 
 
 def _strip_publisher_presentation(root: etree._Element) -> None:
@@ -489,6 +633,13 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
                 _replace_classes(element, role)
                 after_boundary = role in {"eo-image", "eo-toc-heading", "eo-toc-part"}
                 continue
+            if document_role == "part":
+                role = _part_paragraph_role(element, after_boundary)
+                if role == "eo-part":
+                    _rename_element(element, "h1")
+                _replace_classes(element, role)
+                after_boundary = role in {"eo-image", "eo-part", "eo-scene-break"}
+                continue
             role = _paragraph_role(element, source_classes, after_boundary, is_front_matter)
             _replace_classes(element, role)
             after_boundary = role in {
@@ -513,6 +664,7 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
                 if role in {
                     "eo-chapter",
                     "eo-front",
+                    "eo-part",
                     "eo-section",
                     "eo-toc-heading",
                 }:
@@ -647,6 +799,17 @@ def _paragraph_role(
     if is_front_matter:
         return "eo-front-body"
     return "eo-body"
+
+
+def _part_paragraph_role(element: etree._Element, after_boundary: bool) -> str:
+    if _contains_direct_image(element):
+        return "eo-image"
+    if _is_scene_break(element):
+        return "eo-scene-break"
+    text = _normalized_text(element)
+    if after_boundary and _is_short_heading_text(text):
+        return "eo-part"
+    return "eo-first" if after_boundary else "eo-body"
 
 
 def _container_role(classes: set[str]) -> str | None:
@@ -914,11 +1077,14 @@ def _is_scene_break(element: etree._Element) -> bool:
 
 
 def _document_role(item: etree._Element) -> str:
+    properties = item.attrib.get("properties", "").lower().split()
+    if "nav" in properties:
+        return "toc"
     values = " ".join(
         [
             item.attrib.get("id", ""),
             item.attrib.get("href", ""),
-            item.attrib.get("properties", ""),
+            " ".join(properties),
         ]
     ).lower()
     if any(hint in values for hint in FRONT_MATTER_HINTS):
