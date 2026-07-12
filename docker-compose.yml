@@ -1,5 +1,6 @@
 services:
   epub-optimizer:
+    container_name: epub-optimizer
     image: ghcr.io/henrybaby/epub-optimizer:latest
     restart: unless-stopped
     ports:
