@@ -78,8 +78,8 @@ def test_optimize_front_matter_nested_divs_and_empty_breaks(tmp_path: Path) -> N
 
     assert 'class="eo-front-body"' in front
     assert '<h1 class="eo-front">ALSO BY WRITER</h1>' in front
-    assert '<p class="eo-front-body"><i>First Book</i></p>' in front
-    assert '<p class="eo-front-body"><i>Second Book</i></p>' in front
+    assert '<p class="eo-front-list-item"><i>First Book</i></p>' in front
+    assert '<p class="eo-front-list-item"><i>Second Book</i></p>' in front
     assert '<span class="eo-smallcaps">ITIES</span>' in chapter
     assert '<p class="eo-scene-break"/>' in chapter or '<p class="eo-scene-break"></p>' in chapter
 

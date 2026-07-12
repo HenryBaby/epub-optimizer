@@ -10,4 +10,4 @@ def test_homepage_renders() -> None:
 
     assert response.status_code == 200
     assert "EPUB Optimizer" in response.text
-    assert "v0.1.10" in response.text
+    assert "v0.1.11" in response.text

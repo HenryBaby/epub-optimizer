@@ -36,6 +36,12 @@ p.eo-front-body {
   text-indent: 1em;
 }
 
+p.eo-front-list-item {
+  margin: 0.4em 0;
+  text-align: center;
+  text-indent: 0;
+}
+
 h1,
 h2,
 h3,

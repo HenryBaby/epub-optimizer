@@ -485,6 +485,7 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
                 "eo-centered",
                 "eo-extract",
                 "eo-footnote",
+                "eo-front-list-item",
                 "eo-image",
                 "eo-poetry",
                 "eo-scene-break",
@@ -511,6 +512,7 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
                         "eo-centered",
                         "eo-extract",
                         "eo-footnote",
+                        "eo-front-list-item",
                         "eo-image",
                         "eo-poetry",
                         "eo-scene-break",
@@ -531,7 +533,7 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
                         continue
                     _rename_element(element, "p")
                     _replace_classes(element, role)
-                    after_boundary = role in {"eo-scene-break", "eo-image"}
+                    after_boundary = role in {"eo-front-list-item", "eo-scene-break", "eo-image"}
                 continue
 
         if local in {"div", "figure", "section"}:
@@ -653,6 +655,8 @@ def _anonymous_div_role(
             and _is_short_heading_text(text)
         ):
             return "eo-front"
+        if _is_front_list_item(element):
+            return "eo-front-list-item"
         return "eo-front-body"
     if document_role == "part":
         if (
@@ -680,6 +684,8 @@ def _front_nested_div_role(element: etree._Element, after_boundary: bool) -> str
         return None
     if after_boundary and _is_first_meaningful_sibling(element) and _is_short_heading_text(text):
         return "eo-front"
+    if _is_front_list_item(element):
+        return "eo-front-list-item"
     return "eo-front-body"
 
 
@@ -701,6 +707,32 @@ def _has_block_children(element: etree._Element) -> bool:
         "ul",
     }
     return any(etree.QName(child).localname.lower() in block_names for child in element)
+
+
+def _is_front_list_item(element: etree._Element) -> bool:
+    parent = element.getparent()
+    if parent is None or _is_first_meaningful_sibling(element):
+        return False
+
+    siblings = [
+        child
+        for child in parent
+        if isinstance(child.tag, str) and (_normalized_text(child) or _contains_direct_image(child))
+    ]
+    if len(siblings) < 3:
+        return False
+
+    short_leaf_count = 0
+    text_count = 0
+    for sibling in siblings:
+        text = _normalized_text(sibling)
+        if not text:
+            continue
+        text_count += 1
+        if not _has_block_children(sibling) and _is_short_list_text(text):
+            short_leaf_count += 1
+
+    return text_count >= 3 and short_leaf_count / text_count >= 0.75
 
 
 def _is_first_meaningful_body_child(element: etree._Element) -> bool:
@@ -750,6 +782,11 @@ def _is_probable_smallcaps_span(element: etree._Element) -> bool:
 def _is_short_heading_text(text: str) -> bool:
     words = text.split()
     return len(text) <= 120 and len(words) <= 14
+
+
+def _is_short_list_text(text: str) -> bool:
+    words = text.split()
+    return len(text) <= 90 and len(words) <= 12
 
 
 def _is_scene_break(element: etree._Element) -> bool:
