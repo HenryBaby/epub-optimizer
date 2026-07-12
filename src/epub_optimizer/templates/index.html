@@ -8,40 +8,79 @@
   </head>
   <body>
     <main class="shell">
-      <section class="panel">
-        <div class="title-row">
-          <h1>EPUB Optimizer</h1>
-          <span class="version">v{{ app_version }}</span>
-        </div>
-        <form id="optimizer-form" action="/optimize" method="post" enctype="multipart/form-data">
-          <label for="files">EPUB files</label>
-          <input
-            id="files"
-            name="files"
-            type="file"
-            accept=".epub,application/epub+zip"
-            multiple
-            required
-          >
-          <p class="hint">Maximum upload size: {{ max_upload_mb }} MB</p>
-          <button id="optimize-button" type="submit">Optimize EPUB</button>
-        </form>
-      </section>
-
-      <section class="panel progress" aria-live="polite">
-        <div class="result-header">
-          <div>
-            <h2 id="status-title">Ready</h2>
-            <p id="status-detail">Select one or more EPUB files.</p>
+      <header class="topbar">
+        <div>
+          <div class="eyebrow">Local EPUB processing</div>
+          <div class="title-row">
+            <h1>EPUB Optimizer</h1>
+            <span class="version">v{{ app_version }}</span>
           </div>
         </div>
+        <label class="theme-switch" for="theme-toggle">
+          <input id="theme-toggle" type="checkbox" role="switch" aria-label="Use dark mode">
+          <span class="switch-track"><span class="switch-thumb"></span></span>
+          <span class="theme-label">Dark</span>
+        </label>
+      </header>
 
-        <h3>Processing log</h3>
-        <ol id="processing-log" class="log-window"></ol>
+      <section class="workspace">
+        <div class="panel upload-panel">
+          <div class="panel-heading">
+            <div>
+              <h2>Queue EPUBs</h2>
+              <p>Upload one or more files and process them in order.</p>
+            </div>
+            <span class="limit-badge">{{ max_upload_mb }} MB max</span>
+          </div>
+
+          <form id="optimizer-form" action="/optimize" method="post" enctype="multipart/form-data">
+            <label class="dropzone" for="files">
+              <span class="dropzone-icon" aria-hidden="true">+</span>
+              <span>
+                <strong>Select EPUB files</strong>
+                <small id="file-summary">No files selected</small>
+              </span>
+              <input
+                id="files"
+                name="files"
+                type="file"
+                accept=".epub,application/epub+zip"
+                multiple
+                required
+              >
+            </label>
+            <button id="optimize-button" type="submit">Optimize EPUB</button>
+          </form>
+        </div>
+
+        <div class="panel progress-panel" aria-live="polite">
+          <div class="panel-heading compact">
+            <div>
+              <span class="status-pill" id="status-pill">Idle</span>
+              <h2>Activity</h2>
+            </div>
+            <p id="status-detail">Select one or more EPUB files.</p>
+          </div>
+          <div class="status-card">
+            <h2 id="status-title">Ready</h2>
+            <div class="meter" aria-hidden="true"><span id="progress-meter"></span></div>
+          </div>
+
+          <div class="log-heading">
+            <h3>Processing log</h3>
+            <span id="log-count">0 entries</span>
+          </div>
+          <ol id="processing-log" class="log-window"></ol>
+        </div>
       </section>
 
       <section id="results-panel" class="panel result" hidden>
-        <h2>Optimized EPUBs</h2>
+        <div class="panel-heading">
+          <div>
+            <h2>Optimized EPUBs</h2>
+            <p>Finished files are available until the app container is reset.</p>
+          </div>
+        </div>
         <div id="results-list" class="results-list"></div>
       </section>
     </main>

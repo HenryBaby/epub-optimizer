@@ -14,10 +14,13 @@ def test_homepage_renders() -> None:
 
     assert response.status_code == 200
     assert "EPUB Optimizer" in response.text
-    assert "v0.1.24" in response.text
+    assert "v0.1.25" in response.text
     assert 'id="optimizer-form"' in response.text
     assert 'name="files"' in response.text
     assert "multiple" in response.text
+    assert 'id="theme-toggle"' in response.text
+    assert 'id="file-summary"' in response.text
+    assert 'id="progress-meter"' in response.text
     assert "/static/app.js" in response.text
 
 
