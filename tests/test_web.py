@@ -23,12 +23,12 @@ def test_homepage_renders() -> None:
 
     assert response.status_code == 200
     assert "EPUB Optimizer" in response.text
-    assert "v1.0.2" in response.text
+    assert "v1.0.3" in response.text
     assert "/static/favicon.png" in response.text
     assert 'id="optimizer-form"' in response.text
     assert 'name="files"' in response.text
-    assert 'id="folder"' in response.text
-    assert "webkitdirectory" in response.text
+    assert 'id="source-picker"' in response.text
+    assert 'id="choose-folder"' in response.text
     assert "multiple" in response.text
     assert 'id="theme-toggle"' in response.text
     assert 'id="file-summary"' in response.text

@@ -1,6 +1,9 @@
 const form = document.querySelector("#optimizer-form");
 const fileInput = document.querySelector("#files");
-const folderInput = document.querySelector("#folder");
+const sourcePicker = document.querySelector("#source-picker");
+const sourceMenu = document.querySelector("#source-menu");
+const chooseFiles = document.querySelector("#choose-files");
+const chooseFolder = document.querySelector("#choose-folder");
 const button = document.querySelector("#optimize-button");
 const statusTitle = document.querySelector("#status-title");
 const statusDetail = document.querySelector("#status-detail");
@@ -16,6 +19,8 @@ const themeToggle = document.querySelector("#theme-toggle");
 
 let queueTotal = 0;
 let queueCompleted = 0;
+let selectedFiles = [];
+let selectionMade = false;
 const TASKS = [
   { key: "start", label: "Preparing EPUB files", icon: "start" },
   { key: "validate", label: "Validating EPUB archives", icon: "validate" },
@@ -38,7 +43,41 @@ themeToggle.addEventListener("change", () => {
 });
 
 fileInput.addEventListener("change", updateFileSummary);
-folderInput.addEventListener("change", updateFileSummary);
+
+sourcePicker.addEventListener("click", () => {
+  sourceMenu.hidden = !sourceMenu.hidden;
+});
+
+chooseFiles.addEventListener("click", () => {
+  sourceMenu.hidden = true;
+  fileInput.click();
+});
+
+chooseFolder.addEventListener("click", async () => {
+  sourceMenu.hidden = true;
+  if (!window.showDirectoryPicker) {
+    setStatus("Folder picker unavailable", "Use a Chromium-based browser to select folders.");
+    return;
+  }
+
+  try {
+    const directory = await window.showDirectoryPicker();
+    selectedFiles = await epubFilesFromDirectory(directory);
+    selectionMade = true;
+    fileInput.value = "";
+    updateFileSummary();
+  } catch (error) {
+    if (!(error instanceof DOMException && error.name === "AbortError")) {
+      setStatus("Folder selection failed", "The folder could not be read.");
+    }
+  }
+});
+
+document.addEventListener("click", (event) => {
+  if (!sourceMenu.hidden && !event.target.closest(".picker-wrap")) {
+    sourceMenu.hidden = true;
+  }
+});
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -357,7 +396,9 @@ function setStatus(title, detail, pill = "Idle") {
 function setBusy(isBusy) {
   button.disabled = isBusy;
   fileInput.disabled = isBusy;
-  folderInput.disabled = isBusy;
+  sourcePicker.disabled = isBusy;
+  chooseFiles.disabled = isBusy;
+  chooseFolder.disabled = isBusy;
   button.textContent = isBusy ? "Optimizing..." : "Optimize EPUB";
 }
 
@@ -367,11 +408,15 @@ function updateProgress() {
 }
 
 function updateFileSummary() {
-  const selectedFiles = [...Array.from(fileInput.files || []), ...Array.from(folderInput.files || [])];
+  const inputFiles = Array.from(fileInput.files || []);
+  if (inputFiles.length > 0) {
+    selectedFiles = inputFiles.filter(isEpubFile);
+    selectionMade = true;
+  }
+
   const files = selectedEpubFiles();
   if (files.length === 0) {
-    fileSummary.textContent =
-      selectedFiles.length === 0 ? "No files selected" : "No EPUB files found in selection";
+    fileSummary.textContent = selectionMade ? "No EPUB files found in selection" : "No files selected";
     return;
   }
 
@@ -380,9 +425,27 @@ function updateFileSummary() {
 }
 
 function selectedEpubFiles() {
-  return [...Array.from(fileInput.files || []), ...Array.from(folderInput.files || [])].filter(
-    (file) => file.name.toLowerCase().endsWith(".epub"),
-  );
+  return selectedFiles;
+}
+
+async function epubFilesFromDirectory(directory) {
+  const files = [];
+  await collectEpubFiles(directory, files);
+  return files.sort((first, second) => first.name.localeCompare(second.name));
+}
+
+async function collectEpubFiles(directory, files) {
+  for await (const entry of directory.values()) {
+    if (entry.kind === "file" && entry.name.toLowerCase().endsWith(".epub")) {
+      files.push(await entry.getFile());
+    } else if (entry.kind === "directory") {
+      await collectEpubFiles(entry, files);
+    }
+  }
+}
+
+function isEpubFile(file) {
+  return file.name.toLowerCase().endsWith(".epub");
 }
 
 function formatBytes(bytes) {

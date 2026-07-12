@@ -35,32 +35,28 @@
           </div>
 
           <form id="optimizer-form" action="/optimize" method="post" enctype="multipart/form-data">
-            <label class="dropzone" for="files">
-              <span class="dropzone-icon" aria-hidden="true">+</span>
-              <span>
-                <strong>Select EPUB files or a folder</strong>
-                <small id="file-summary">No files selected</small>
-              </span>
-              <input
-                id="files"
-                name="files"
-                type="file"
-                accept=".epub,application/epub+zip"
-                multiple
-              >
-            </label>
+            <div class="picker-wrap">
+              <button id="source-picker" class="dropzone" type="button">
+                <span class="dropzone-icon" aria-hidden="true">+</span>
+                <span>
+                  <strong>Select EPUB files or a folder</strong>
+                  <small id="file-summary">No files selected</small>
+                </span>
+              </button>
+              <div id="source-menu" class="picker-menu" hidden>
+                <button id="choose-files" type="button">Choose EPUB files</button>
+                <button id="choose-folder" type="button">Choose folder</button>
+              </div>
+            </div>
             <input
-              id="folder"
-              class="folder-input"
+              id="files"
+              class="file-input"
+              name="files"
               type="file"
-              webkitdirectory
-              directory
+              accept=".epub,application/epub+zip"
               multiple
             >
-            <div class="upload-actions">
-              <button id="optimize-button" type="submit">Optimize EPUB</button>
-              <label class="button secondary" for="folder">Choose folder</label>
-            </div>
+            <button id="optimize-button" type="submit">Optimize EPUB</button>
           </form>
         </div>
 
