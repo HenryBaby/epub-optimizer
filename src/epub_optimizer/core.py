@@ -504,6 +504,12 @@ def _namespaced_tag(element: etree._Element, local_name: str) -> str:
     return local_name
 
 
+def _local_name(element: etree._Element) -> str | None:
+    if not isinstance(element.tag, str):
+        return None
+    return etree.QName(element).localname.lower()
+
+
 def _refine_document_role(root: etree._Element, document_role: str) -> str:
     if document_role in {"part", "title", "toc", "works"}:
         return document_role
@@ -736,8 +742,11 @@ def _remove_element_preserving_tail(element: etree._Element) -> None:
 
 def _strip_publisher_presentation(root: etree._Element) -> None:
     for element in root.xpath("//*"):
+        local_element = _local_name(element)
         for attr in list(element.attrib):
             local_attr = attr.rsplit("}", 1)[-1].lower()
+            if local_element in {"svg", "image"} and local_attr in {"height", "width"}:
+                continue
             if local_attr in PRESENTATION_ATTRS:
                 del element.attrib[attr]
 
@@ -904,6 +913,15 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
             continue
 
         if local == "p":
+            letter_role = _letter_paragraph_role(source_classes)
+            if letter_role or _has_ancestor_class(element, "eo-letter"):
+                _replace_classes(element, letter_role or "eo-letter-body")
+                after_boundary = False
+                continue
+            if _is_letter_attribution(source_classes):
+                _replace_classes(element, "eo-letter-attribution")
+                after_boundary = True
+                continue
             if document_role == "toc":
                 role = _toc_entry_role(element, source_classes, after_boundary)
                 if role == "eo-toc-heading":
@@ -969,6 +987,7 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
                 "eo-footnote",
                 "eo-front-list-item",
                 "eo-image",
+                "eo-letter-attribution",
                 "eo-poetry",
                 "eo-scene-break",
             }
@@ -1007,7 +1026,7 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
                     after_boundary = True
                     opening_epigraph = False
                 else:
-                    if _has_block_children(element):
+                    if role == "eo-image" or _has_block_children(element):
                         _replace_classes(element, role)
                         after_boundary = True
                         opening_epigraph = False
@@ -1038,7 +1057,10 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
                 continue
 
         if local == "div" and document_role == "front":
-            role = _front_nested_div_role(element, after_boundary)
+            role = _container_role(source_classes) or _front_nested_div_role(
+                element,
+                after_boundary,
+            )
             if role:
                 if role == "eo-front":
                     _rename_element(element, "h1")
@@ -1191,6 +1213,11 @@ def _paragraph_role(
         return "eo-image"
     if _is_scene_break(element):
         return "eo-scene-break"
+    letter_role = _letter_paragraph_role(classes)
+    if letter_role:
+        return letter_role
+    if _is_letter_attribution(classes):
+        return "eo-letter-attribution"
     if classes & {"caption", "figcaption"}:
         return "eo-caption"
     if classes & {"center", "center0", "bl_center", "eo-centered"}:
@@ -1210,6 +1237,20 @@ def _paragraph_role(
     if is_front_matter:
         return "eo-front-body"
     return "eo-body"
+
+
+def _letter_paragraph_role(classes: set[str]) -> str | None:
+    if classes & {"ltg", "letter-greeting", "salutation"}:
+        return "eo-letter-opener"
+    if classes & {"ltf", "letter-first"}:
+        return "eo-letter-first"
+    if classes & {"lt", "ltl", "letter", "letter-body", "letter-last"}:
+        return "eo-letter-body"
+    return None
+
+
+def _is_letter_attribution(classes: set[str]) -> bool:
+    return bool(classes & {"ept", "letter-source", "letter-credit", "missive-source"})
 
 
 def _blockquote_role(classes: set[str], document_role: str) -> str:
@@ -1397,6 +1438,15 @@ def _contains_credit_label_before(element: etree._Element) -> bool:
     return False
 
 
+def _has_ancestor_class(element: etree._Element, class_name: str) -> bool:
+    parent = element.getparent()
+    while parent is not None:
+        if class_name in parent.attrib.get("class", "").split():
+            return True
+        parent = parent.getparent()
+    return False
+
+
 def _container_role(classes: set[str]) -> str | None:
     if classes & {"part"}:
         return "eo-part"
@@ -1406,6 +1456,8 @@ def _container_role(classes: set[str]) -> str | None:
         return "eo-centered"
     if classes & {"cover", "titlepage", "dis_img"}:
         return "eo-image"
+    if classes & {"letter", "missive", "diary", "journal"}:
+        return "eo-letter"
     if classes & {"block", "textbox", "abstract", "epigraph"}:
         return "eo-extract"
     if classes & {"poem", "poetry", "verse", "stanza"}:
@@ -1422,7 +1474,7 @@ def _container_role(classes: set[str]) -> str | None:
 
 
 def _contains_direct_image(element: etree._Element) -> bool:
-    return any(etree.QName(child).localname.lower() == "img" for child in element)
+    return any(_local_name(child) in {"img", "svg"} for child in element)
 
 
 def _is_direct_body_child(element: etree._Element) -> bool:
@@ -1525,7 +1577,7 @@ def _has_block_children(element: etree._Element) -> bool:
         "table",
         "ul",
     }
-    return any(etree.QName(child).localname.lower() in block_names for child in element)
+    return any(_local_name(child) in block_names for child in element)
 
 
 def _contains_emphasis(element: etree._Element) -> bool:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import tempfile
 import uuid
@@ -12,7 +13,7 @@ from pathlib import Path
 from typing import Annotated
 from urllib.parse import quote
 
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -26,6 +27,7 @@ BASE_DIR = Path(__file__).resolve().parent
 OUTPUT_BASE_DIR = Path("/data")
 MAX_UPLOAD_MB = int(os.getenv("EPUB_OPTIMIZER_MAX_UPLOAD_MB", "100"))
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
+LOGGER = logging.getLogger(__name__)
 
 app = FastAPI(title="EPUB Optimizer")
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
@@ -47,9 +49,12 @@ def index(request: Request) -> HTMLResponse:
 
 
 @app.post("/optimize")
-async def optimize(files: Annotated[list[UploadFile], File()]) -> StreamingResponse:
+async def optimize(
+    files: Annotated[list[UploadFile], File()],
+    append_suffix: Annotated[bool, Form()] = True,
+) -> StreamingResponse:
     return StreamingResponse(
-        _optimization_events(files),
+        _optimization_events(files, append_suffix=append_suffix),
         media_type="application/x-ndjson",
         headers={"Cache-Control": "no-store"},
     )
@@ -96,7 +101,11 @@ async def _save_upload(file: UploadFile, target: Path) -> None:
             output.write(chunk)
 
 
-async def _optimization_events(files: list[UploadFile]) -> AsyncIterator[str]:
+async def _optimization_events(
+    files: list[UploadFile],
+    *,
+    append_suffix: bool,
+) -> AsyncIterator[str]:
     if not files:
         yield _json_event("error", message="Please upload at least one EPUB file.")
         return
@@ -142,6 +151,7 @@ async def _optimization_events(files: list[UploadFile]) -> AsyncIterator[str]:
         failed = len(files) - len(uploads)
         successful = 0
         completed_downloads: list[str] = []
+        reserved_download_names: set[str] = set()
         persistent_output = _persistent_output_dir()
         persistent_output.mkdir(parents=True, exist_ok=True)
 
@@ -175,7 +185,7 @@ async def _optimization_events(files: list[UploadFile]) -> AsyncIterator[str]:
                     optimize_epub,
                     upload_path,
                     output_dir,
-                    output_filename=optimized_filename(original_name),
+                    output_filename=_output_filename(original_name, append_suffix=append_suffix),
                     max_size_bytes=MAX_UPLOAD_BYTES,
                     progress=report,
                 )
@@ -190,7 +200,10 @@ async def _optimization_events(files: list[UploadFile]) -> AsyncIterator[str]:
 
             try:
                 result = await task
-                download_name = _unique_download_name(persistent_output, result.output_filename)
+                download_name = _batch_download_name(
+                    result.output_filename,
+                    reserved_download_names,
+                )
                 final_output = persistent_output / download_name
                 final_output.write_bytes(result.output_path.read_bytes())
                 yield _json_event(
@@ -220,14 +233,15 @@ async def _optimization_events(files: list[UploadFile]) -> AsyncIterator[str]:
                     filename=original_name,
                     message=str(exc),
                 )
-            except Exception:
+            except Exception as exc:
+                LOGGER.exception("Unexpected optimization failure for %s", original_name)
                 failed += 1
                 yield _json_event(
                     "file_error",
                     index=index,
                     total=len(uploads),
                     filename=original_name,
-                    message="Optimization failed unexpectedly.",
+                    message=f"Optimization failed unexpectedly: {type(exc).__name__}: {exc}",
                 )
 
         if completed_downloads:
@@ -272,6 +286,28 @@ def _unique_download_name(output_dir: Path, filename: str) -> str:
         path = output_dir / candidate
         counter += 1
     return candidate
+
+
+def _batch_download_name(filename: str, reserved_names: set[str]) -> str:
+    safe_name = Path(filename).name
+    candidate = safe_name
+    suffix = Path(safe_name).suffix
+    stem = Path(safe_name).stem
+    counter = 2
+    while candidate.lower() in reserved_names:
+        candidate = f"{stem}-{counter}{suffix}"
+        counter += 1
+    reserved_names.add(candidate.lower())
+    return candidate
+
+
+def _output_filename(filename: str, *, append_suffix: bool) -> str:
+    if append_suffix:
+        return optimized_filename(filename)
+    path = Path(filename)
+    stem = path.stem or "optimized"
+    suffix = path.suffix if path.suffix.lower() == ".epub" else ".epub"
+    return f"{stem}{suffix}"
 
 
 def _json_event(event_type: str, **payload: object) -> str:

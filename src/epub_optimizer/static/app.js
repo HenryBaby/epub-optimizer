@@ -3,6 +3,7 @@ const fileInput = document.querySelector("#files");
 const dropzone = document.querySelector(".dropzone");
 const sourcePicker = document.querySelector("#source-picker");
 const chooseFolder = document.querySelector("#choose-folder");
+const appendSuffix = document.querySelector("#append-suffix");
 const button = document.querySelector("#optimize-button");
 const statusTitle = document.querySelector("#status-title");
 const statusDetail = document.querySelector("#status-detail");
@@ -46,6 +47,9 @@ fileInput.addEventListener("change", updateFileSummary);
 for (const eventName of ["dragenter", "dragover"]) {
   dropzone.addEventListener(eventName, (event) => {
     event.preventDefault();
+    if (button.disabled) {
+      return;
+    }
     dropzone.classList.add("dropzone-active");
   });
 }
@@ -59,6 +63,9 @@ dropzone.addEventListener("dragleave", (event) => {
 dropzone.addEventListener("drop", async (event) => {
   event.preventDefault();
   dropzone.classList.remove("dropzone-active");
+  if (button.disabled) {
+    return;
+  }
 
   selectedFiles = await epubFilesFromDataTransfer(event.dataTransfer);
   selectionMade = true;
@@ -109,6 +116,7 @@ form.addEventListener("submit", async (event) => {
   for (const file of files) {
     formData.append("files", file);
   }
+  formData.append("append_suffix", appendSuffix.checked ? "true" : "false");
 
   try {
     const response = await fetch("/optimize", {
@@ -259,12 +267,14 @@ function updateTask(key, index, total) {
 
 function showTaskError(message, event = null) {
   let row = taskRows.get("error");
+  const errorMessage = event && event.filename ? `${event.filename}: ${message}` : message;
   if (!row) {
-    const task = { key: "error", label: message, icon: "error" };
+    const task = { key: "error", label: errorMessage, icon: "error" };
     row = createTaskRow(task);
     taskRows.set("error", row);
     taskList.append(row.item);
   }
+  row.item.querySelector(".task-message").textContent = errorMessage;
   row.item.className = "task-row task-error";
   row.state.textContent = "Error";
   row.progress.textContent =
@@ -408,6 +418,13 @@ function setBusy(isBusy) {
   fileInput.disabled = isBusy;
   sourcePicker.disabled = isBusy;
   chooseFolder.disabled = isBusy;
+  appendSuffix.disabled = isBusy;
+  dropzone.classList.toggle("dropzone-busy", isBusy);
+  if (isBusy) {
+    dropzone.classList.remove("dropzone-active");
+    sourcePicker.blur();
+    chooseFolder.blur();
+  }
   button.textContent = isBusy ? "Optimizing..." : "Optimize EPUB";
 }
 

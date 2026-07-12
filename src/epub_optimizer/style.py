@@ -263,6 +263,36 @@ p.eo-blockquote {
   text-indent: 0;
 }
 
+div.eo-letter {
+  margin: 1.5em 2em;
+  font-size: 0.85em;
+  line-height: 1.35;
+}
+
+p.eo-letter-opener,
+p.eo-letter-first,
+p.eo-letter-body {
+  margin: 0.35em 0;
+  text-align: justify;
+}
+
+p.eo-letter-opener,
+p.eo-letter-first {
+  text-indent: 0;
+}
+
+p.eo-letter-body {
+  text-indent: 1em;
+}
+
+p.eo-letter-attribution {
+  margin: 0.75em 2em 1.2em;
+  font-size: 0.85em;
+  line-height: 1.35;
+  text-align: right;
+  text-indent: 0;
+}
+
 p.eo-caption,
 figcaption.eo-caption {
   margin: 0.5em 0 1em;
@@ -280,6 +310,11 @@ p.eo-image {
 }
 
 img {
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.eo-image svg {
   max-width: 100%;
   max-height: 100%;
 }

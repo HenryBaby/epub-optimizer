@@ -242,17 +242,36 @@ button:focus-visible,
   align-items: center;
 }
 
+.activity-title {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.activity-title h2 {
+  margin: 0;
+}
+
+.panel-heading.compact p {
+  max-width: 52%;
+  margin-top: 0;
+  color: var(--muted);
+  line-height: 1.4;
+  text-align: right;
+}
+
 .limit-badge,
 .status-pill {
   display: inline-flex;
   align-items: center;
-  min-height: 28px;
+  min-height: 24px;
   border: 1px solid var(--border);
   border-radius: 999px;
-  padding: 5px 10px;
+  padding: 4px 9px;
   background: var(--surface-strong);
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 800;
   white-space: nowrap;
 }
@@ -312,15 +331,30 @@ form {
   clip: rect(0 0 0 0);
 }
 
-.dropzone:hover,
-.dropzone:focus-within {
+.dropzone:not(.dropzone-busy):hover,
+.dropzone:not(.dropzone-busy):focus-within {
   border-color: var(--magenta);
   background: color-mix(in srgb, var(--accent-soft) 82%, var(--surface));
 }
 
-.dropzone-active {
+.dropzone-active:not(.dropzone-busy) {
   border-color: var(--magenta);
   background: color-mix(in srgb, var(--accent-soft) 88%, var(--surface));
+}
+
+.dropzone-busy {
+  border-color: var(--border);
+  background: color-mix(in srgb, var(--surface-strong) 92%, var(--surface));
+}
+
+.dropzone-busy .dropzone-main {
+  cursor: not-allowed;
+}
+
+.dropzone-busy .dropzone-icon,
+.dropzone-busy strong,
+.dropzone-busy small {
+  opacity: 0.72;
 }
 
 .folder-link:focus-visible {
@@ -386,6 +420,30 @@ form {
   overflow-wrap: anywhere;
 }
 
+.filename-option {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  width: fit-content;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.filename-option input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--magenta);
+}
+
+.filename-option code {
+  color: var(--pink);
+  font-family: inherit;
+  font-weight: 800;
+}
+
 button:not(.dropzone-main):not(.folder-link),
 .button {
   display: inline-flex;
@@ -444,6 +502,12 @@ button:disabled {
   color: var(--surface);
   cursor: not-allowed;
   transform: none;
+}
+
+.dropzone-main:disabled {
+  background: transparent;
+  color: var(--text);
+  cursor: not-allowed;
 }
 
 .status-card {
@@ -805,6 +869,11 @@ dd {
 
   .topbar {
     gap: 16px;
+  }
+
+  .panel-heading.compact p {
+    max-width: none;
+    text-align: left;
   }
 
   h1 {

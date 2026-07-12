@@ -205,6 +205,25 @@ def test_optimize_narrative_prologue_uses_body_flow(tmp_path: Path) -> None:
     assert "eo-front-body" not in prologue
 
 
+def test_optimize_prologue_preserves_letter_inset(tmp_path: Path) -> None:
+    source = tmp_path / "prologue-letter.epub"
+    _write_prologue_letter_epub(source)
+
+    result = optimize_epub(source, tmp_path / "out-prologue-letter")
+
+    with zipfile.ZipFile(result.output_path) as archive:
+        prologue = archive.read("OEBPS/prologue.xhtml").decode("utf-8")
+        css = archive.read("Styles/epub-optimizer.css").decode("utf-8")
+
+    assert '<div class="eo-letter">' in prologue
+    assert '<p class="eo-letter-opener">My dear correspondent,</p>' in prologue
+    assert '<p class="eo-letter-first">This is the first line of the letter' in prologue
+    assert '<p class="eo-letter-body">This is the following line of the letter' in prologue
+    assert '<p class="eo-letter-attribution">Missive from A to B</p>' in prologue
+    assert '<p class="eo-first">This is the first narrative paragraph' in prologue
+    assert "eo-letter" in css
+
+
 def test_optimize_narrative_introduction_uses_body_flow(tmp_path: Path) -> None:
     source = tmp_path / "introduction.epub"
     _write_narrative_introduction_epub(source)
@@ -274,6 +293,39 @@ def test_optimize_part_pages_images_empty_blocks_and_ncx(tmp_path: Path) -> None
     assert 'playOrder="1"' in ncx
 
 
+def test_optimize_preserves_svg_cover_sizing(tmp_path: Path) -> None:
+    source = tmp_path / "svg-cover.epub"
+    _write_svg_cover_epub(source)
+
+    result = optimize_epub(source, tmp_path / "out-svg-cover")
+
+    with zipfile.ZipFile(result.output_path) as archive:
+        titlepage = archive.read("OEBPS/xhtml/titlepage.xhtml").decode("utf-8")
+        css = archive.read("OEBPS/Styles/epub-optimizer.css").decode("utf-8")
+
+    assert '<div class="eo-image">' in titlepage
+    assert 'class="eo-scene-break"' not in titlepage
+    assert 'width="100%"' in titlepage
+    assert 'height="100%"' in titlepage
+    assert 'width="1246"' in titlepage
+    assert 'height="2200"' in titlepage
+    assert ".eo-image svg" in css
+
+
+def test_optimize_ignores_comment_nodes_inside_blocks(tmp_path: Path) -> None:
+    source = tmp_path / "comment-nodes.epub"
+    _write_comment_node_epub(source)
+
+    result = optimize_epub(source, tmp_path / "out-comments")
+
+    with zipfile.ZipFile(result.output_path) as archive:
+        chapter = archive.read("OEBPS/Text/chapter.xhtml").decode("utf-8")
+
+    assert "publisher marker" in chapter
+    assert "inline marker" in chapter
+    assert 'class="eo-body"' in chapter
+
+
 def _write_minimal_epub(path: Path) -> None:
     with zipfile.ZipFile(path, "w") as archive:
         archive.writestr(
@@ -336,6 +388,122 @@ def _write_minimal_epub(path: Path) -> None:
 </html>
 """,
         )
+
+
+def _write_comment_node_epub(path: Path) -> None:
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr(
+            "mimetype",
+            "application/epub+zip",
+            compress_type=zipfile.ZIP_STORED,
+        )
+        archive.writestr(
+            "META-INF/container.xml",
+            """<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>
+""",
+        )
+        archive.writestr(
+            "OEBPS/content.opf",
+            """<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="id" version="3.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="id">urn:test-comments</dc:identifier>
+    <dc:title>Comment Nodes</dc:title>
+    <dc:language>en</dc:language>
+  </metadata>
+  <manifest>
+    <item id="chapter" href="Text/chapter.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="chapter"/>
+  </spine>
+</package>
+""",
+        )
+        archive.writestr(
+            "OEBPS/Text/chapter.xhtml",
+            """<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head><title>Comment Nodes</title></head>
+  <body>
+    <p><!-- publisher marker -->Chapter One</p>
+    <p>Body text.<!-- inline marker --></p>
+  </body>
+</html>
+""",
+        )
+
+
+def _write_svg_cover_epub(path: Path) -> None:
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr(
+            "mimetype",
+            "application/epub+zip",
+            compress_type=zipfile.ZIP_STORED,
+        )
+        archive.writestr(
+            "META-INF/container.xml",
+            """<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>
+""",
+        )
+        archive.writestr(
+            "OEBPS/content.opf",
+            """<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="id" version="3.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="id">urn:test-svg-cover</dc:identifier>
+    <dc:title>SVG Cover</dc:title>
+    <dc:language>en</dc:language>
+  </metadata>
+  <manifest>
+    <item
+      id="titlepage1"
+      href="xhtml/titlepage.xhtml"
+      media-type="application/xhtml+xml"
+      properties="svg calibre:title-page"
+    />
+    <item id="cover" href="images/cover.jpg" media-type="image/jpeg" properties="cover-image"/>
+  </manifest>
+  <spine>
+    <itemref idref="titlepage1"/>
+  </spine>
+</package>
+""",
+        )
+        archive.writestr(
+            "OEBPS/xhtml/titlepage.xhtml",
+            """<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+  <head>
+    <title>Cover</title>
+    <style type="text/css">
+      body { text-align: center; padding: 0; margin: 0; }
+    </style>
+  </head>
+  <body>
+    <div>
+      <svg version="1.1" xmlns="http://www.w3.org/2000/svg"
+        xmlns:xlink="http://www.w3.org/1999/xlink"
+        width="100%" height="100%" viewBox="0 0 1246 2200"
+        preserveAspectRatio="none">
+        <image width="1246" height="2200" xlink:href="../images/cover.jpg"/>
+      </svg>
+    </div>
+  </body>
+</html>
+""",
+        )
+        archive.writestr("OEBPS/images/cover.jpg", b"fake-cover")
 
 
 def _write_root_opf_div_chapter_epub(path: Path) -> None:
@@ -849,6 +1017,66 @@ def _write_narrative_prologue_epub(path: Path) -> None:
     the same paragraph flow rules as a chapter opening after the epigraph.</p>
     <p>This is the second prose paragraph in that same prologue. It should continue
     the same context as body text and should not be classified as front matter.</p>
+  </body>
+</html>
+""",
+        )
+
+
+def _write_prologue_letter_epub(path: Path) -> None:
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr(
+            "mimetype",
+            "application/epub+zip",
+            compress_type=zipfile.ZIP_STORED,
+        )
+        archive.writestr(
+            "META-INF/container.xml",
+            """<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>
+""",
+        )
+        archive.writestr(
+            "content.opf",
+            """<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="id" version="3.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="id">urn:test-prologue-letter</dc:identifier>
+    <dc:title>Prologue Letter Test</dc:title>
+    <dc:language>en</dc:language>
+  </metadata>
+  <manifest>
+    <item id="prologue" href="OEBPS/prologue.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="prologue"/>
+  </spine>
+</package>
+""",
+        )
+        archive.writestr(
+            "OEBPS/prologue.xhtml",
+            """<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head><title>Prologue Letter Test</title></head>
+  <body>
+    <div class="chapter1">
+      <p class="cn">Prologue</p>
+      <div class="letter">
+        <p class="ltg">My dear correspondent,</p>
+        <p class="ltf">This is the first line of the letter and should remain inset.</p>
+        <p class="lt">This is the following line of the letter and should be compact.</p>
+      </div>
+      <div class="epigraph">
+        <p class="ept">Missive from A to B</p>
+      </div>
+      <p class="pf">This is the first narrative paragraph after the letter.</p>
+      <p class="calibre4">This is the second narrative paragraph after the letter.</p>
+    </div>
   </body>
 </html>
 """,

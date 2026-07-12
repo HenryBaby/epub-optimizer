@@ -57,6 +57,10 @@
               accept=".epub,application/epub+zip"
               multiple
             >
+            <label class="filename-option" for="append-suffix">
+              <input id="append-suffix" name="append_suffix" type="checkbox" checked>
+              <span>Append <code>-optimized</code> to output filenames</span>
+            </label>
             <button id="optimize-button" type="submit">Optimize EPUB</button>
           </form>
         </div>
@@ -64,8 +68,10 @@
         <div class="panel progress-panel" aria-live="polite">
           <div class="panel-heading compact">
             <div>
-              <span class="status-pill" id="status-pill">Idle</span>
-              <h2>Activity</h2>
+              <div class="activity-title">
+                <h2>Activity</h2>
+                <span class="status-pill" id="status-pill">Idle</span>
+              </div>
             </div>
             <p id="status-detail">Select one or more EPUB files.</p>
           </div>

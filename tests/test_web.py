@@ -23,12 +23,13 @@ def test_homepage_renders() -> None:
 
     assert response.status_code == 200
     assert "EPUB Optimizer" in response.text
-    assert "v1.0.3" in response.text
+    assert "v1.0.4" in response.text
     assert "/static/favicon.png" in response.text
     assert 'id="optimizer-form"' in response.text
     assert 'name="files"' in response.text
     assert 'id="source-picker"' in response.text
     assert 'id="choose-folder"' in response.text
+    assert 'id="append-suffix"' in response.text
     assert "multiple" in response.text
     assert 'id="theme-toggle"' in response.text
     assert 'id="file-summary"' in response.text
@@ -70,6 +71,115 @@ def test_streaming_optimize_handles_url_significant_filename_chars() -> None:
     expired_download = client.get(complete["download_url"])
 
     assert expired_download.status_code == 404
+
+
+def test_streaming_optimize_can_preserve_original_filename() -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/optimize",
+        data={"append_suffix": "false"},
+        files={
+            "files": (
+                "Original Name.epub",
+                _minimal_epub_bytes(),
+                "application/epub+zip",
+            )
+        },
+    )
+
+    assert response.status_code == 200
+    events = [json.loads(line) for line in response.text.splitlines() if line.strip()]
+    complete = next(event for event in events if event["type"] == "file_complete")
+
+    assert complete["output_filename"] == "Original Name.epub"
+    assert complete["download_url"] == "/download/Original%20Name.epub"
+
+
+def test_streaming_optimize_ignores_stale_output_name_collisions(tmp_path) -> None:
+    output_dir = tmp_path / "epub-optimizer"
+    output_dir.mkdir()
+    (output_dir / "Original Name.epub").write_bytes(b"stale")
+    client = TestClient(app)
+
+    response = client.post(
+        "/optimize",
+        data={"append_suffix": "false"},
+        files={
+            "files": (
+                "Original Name.epub",
+                _minimal_epub_bytes(),
+                "application/epub+zip",
+            )
+        },
+    )
+
+    assert response.status_code == 200
+    events = [json.loads(line) for line in response.text.splitlines() if line.strip()]
+    complete = next(event for event in events if event["type"] == "file_complete")
+
+    assert complete["download_name"] == "Original Name.epub"
+    assert complete["download_url"] == "/download/Original%20Name.epub"
+    assert (output_dir / "Original Name.epub").read_bytes() != b"stale"
+
+
+def test_streaming_optimize_disambiguates_duplicate_batch_names() -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/optimize",
+        data={"append_suffix": "false"},
+        files=[
+            (
+                "files",
+                (
+                    "Same.epub",
+                    _minimal_epub_bytes(),
+                    "application/epub+zip",
+                ),
+            ),
+            (
+                "files",
+                (
+                    "Same.epub",
+                    _minimal_epub_bytes(),
+                    "application/epub+zip",
+                ),
+            ),
+        ],
+    )
+
+    assert response.status_code == 200
+    events = [json.loads(line) for line in response.text.splitlines() if line.strip()]
+    completed = [event for event in events if event["type"] == "file_complete"]
+
+    assert [event["download_name"] for event in completed] == ["Same.epub", "Same-2.epub"]
+
+
+def test_streaming_optimize_reports_unexpected_exception(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail_optimization(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("epub_optimizer.web.optimize_epub", fail_optimization)
+    client = TestClient(app)
+
+    response = client.post(
+        "/optimize",
+        files={
+            "files": (
+                "Broken.epub",
+                _minimal_epub_bytes(),
+                "application/epub+zip",
+            )
+        },
+    )
+
+    assert response.status_code == 200
+    events = [json.loads(line) for line in response.text.splitlines() if line.strip()]
+    error = next(event for event in events if event["type"] == "file_error")
+
+    assert error["filename"] == "Broken.epub"
+    assert error["message"] == "Optimization failed unexpectedly: RuntimeError: boom"
 
 
 def test_streaming_optimize_accepts_multiple_files() -> None:
