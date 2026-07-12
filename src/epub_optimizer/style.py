@@ -129,14 +129,16 @@ h6.eo-section {
 }
 
 p.eo-centered,
-div.eo-centered {
+div.eo-centered,
+blockquote.eo-centered {
   margin: 1em 0;
   text-indent: 0;
   text-align: center;
 }
 
 p.eo-right,
-div.eo-right {
+div.eo-right,
+blockquote.eo-right {
   margin: 0;
   text-indent: 0;
   text-align: right;

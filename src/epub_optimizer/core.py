@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import posixpath
+import re
 import tempfile
 import time
 from pathlib import Path, PurePosixPath
@@ -135,6 +136,7 @@ def optimize_epub(
 
         items = _manifest_items(manifest)
         removable_hrefs = _removable_manifest_hrefs(items)
+        stylesheet_class_roles = _stylesheet_class_roles(work_dir, package_dir, removable_hrefs)
         content_items = [
             item
             for item in items
@@ -172,6 +174,7 @@ def optimize_epub(
                 canonical_css_package_href,
                 work_dir,
                 _document_role(item),
+                stylesheet_class_roles,
             ):
                 processed_docs += 1
 
@@ -320,6 +323,30 @@ def _delete_package_files(work_dir: Path, package_dir: str, hrefs: list[str]) ->
     return deleted
 
 
+def _stylesheet_class_roles(
+    work_dir: Path,
+    package_dir: str,
+    hrefs: list[str],
+) -> dict[str, str]:
+    roles: dict[str, str] = {}
+    for href in hrefs:
+        if not href.lower().split("#", 1)[0].endswith(".css"):
+            continue
+        package_path = _join_package_path(package_dir, href)
+        file_path = work_dir / Path(*PurePosixPath(package_path).parts)
+        if not file_path.is_file():
+            continue
+        css = file_path.read_text(encoding="utf-8", errors="replace")
+        for match in re.finditer(r"\.([A-Za-z0-9_-]+)\s*\{([^}]*)\}", css):
+            class_name = match.group(1).lower()
+            declarations = match.group(2).lower()
+            if re.search(r"text-align\s*:\s*right\b", declarations):
+                roles[class_name] = "eo-right"
+            elif re.search(r"text-align\s*:\s*center\b", declarations):
+                roles[class_name] = "eo-centered"
+    return roles
+
+
 def _join_package_path(package_dir: str, href: str) -> str:
     joined = posixpath.normpath(posixpath.join(package_dir, href))
     if joined.startswith("../") or joined == ".." or joined.startswith("/"):
@@ -333,6 +360,7 @@ def _process_content_document(
     canonical_css_package_href: str,
     work_dir: Path,
     document_role: str,
+    stylesheet_class_roles: dict[str, str],
 ) -> bool:
     parser = etree.XMLParser(resolve_entities=False, no_network=True, recover=True)
     tree = etree.parse(str(content_file), parser)
@@ -345,10 +373,12 @@ def _process_content_document(
         _append_stylesheet_link(head, css_href)
 
     _sanitize_links(root)
+    _apply_presentation_role_hints(root, stylesheet_class_roles)
     _strip_publisher_presentation(root)
     _remove_broken_images(root, content_file, work_dir)
     _unwrap_font_elements(root)
     _normalize_inline_spans(root)
+    _collapse_nested_blockquotes(root)
     _remove_empty_blocks(root)
     document_role = _refine_document_role(root, document_role)
     _classify_blocks(root, document_role)
@@ -463,6 +493,10 @@ def _refine_document_role(root: etree._Element, document_role: str) -> str:
         return document_role
     if document_role == "metadata":
         return "metadata"
+    if _looks_like_toc_document(root):
+        return "toc"
+    if _looks_like_dedication_document(root):
+        return "dedication"
     if _looks_like_metadata_page(root):
         return "metadata"
     if document_role == "prologue" and _looks_like_narrative_prologue(root):
@@ -474,6 +508,45 @@ def _refine_document_role(root: etree._Element, document_role: str) -> str:
     if _looks_like_works_list_document(root):
         return "works"
     return document_role
+
+
+def _looks_like_toc_document(root: etree._Element) -> bool:
+    blocks = [
+        element
+        for element in _meaningful_body_blocks(root)
+        if not _has_block_children(element)
+    ]
+    if len(blocks) < 5:
+        return False
+
+    first_text = _normalized_text(blocks[0]).lower()
+    if first_text not in {"contents", "table of contents"}:
+        return False
+
+    texts = [_normalized_text(element) for element in blocks[:80]]
+    short_count = sum(1 for text in texts if _is_short_list_text(text))
+    link_count = sum(1 for element in blocks[:80] if _contains_link(element))
+    chapterish_count = sum(1 for text in texts if _looks_like_chapterish_label(text))
+    return short_count / len(texts) >= 0.8 and (link_count >= 3 or chapterish_count >= 3)
+
+
+def _looks_like_dedication_document(root: etree._Element) -> bool:
+    blocks = [
+        element
+        for element in root.xpath("//*[local-name()='body']//*[self::*]")
+        if etree.QName(element).localname.lower() in {"blockquote", "div", "h1", "h2", "h3", "p"}
+        and _normalized_text(element)
+    ]
+    if not 2 <= len(blocks) <= 12:
+        return False
+
+    first_text = _normalized_text(blocks[0]).lower()
+    if first_text not in {"dedication", "dedicated to"}:
+        return False
+
+    texts = [_normalized_text(element) for element in blocks]
+    short_count = sum(1 for text in texts if len(text) <= 120 and len(text.split()) <= 16)
+    return short_count / len(texts) >= 0.75
 
 
 def _looks_like_narrative_prologue(root: etree._Element) -> bool:
@@ -653,6 +726,56 @@ def _strip_publisher_presentation(root: etree._Element) -> None:
                 del element.attrib[attr]
 
 
+def _apply_presentation_role_hints(
+    root: etree._Element,
+    stylesheet_class_roles: dict[str, str],
+) -> None:
+    for element in root.xpath("//*"):
+        roles: set[str] = set()
+        align = element.attrib.get("align", "").lower()
+        style = element.attrib.get("style", "").lower()
+        classes = set(element.attrib.get("class", "").lower().split())
+
+        if align == "right" or re.search(r"text-align\s*:\s*right\b", style):
+            roles.add("eo-right")
+        elif align == "center" or re.search(r"text-align\s*:\s*center\b", style):
+            roles.add("eo-centered")
+
+        for class_name in classes:
+            role = stylesheet_class_roles.get(class_name)
+            if role:
+                roles.add(role)
+
+        if "eo-right" in roles:
+            _add_class(element, "eo-right")
+        elif "eo-centered" in roles:
+            _add_class(element, "eo-centered")
+
+
+def _collapse_nested_blockquotes(root: etree._Element) -> None:
+    changed = True
+    while changed:
+        changed = False
+        for element in list(root.xpath("//*[local-name()='blockquote']")):
+            children = [child for child in element if isinstance(child.tag, str)]
+            if len(children) != 1:
+                continue
+            child = children[0]
+            if etree.QName(child).localname.lower() != "blockquote":
+                continue
+            if (element.text or "").strip() or (child.tail or "").strip():
+                continue
+            parent = element.getparent()
+            if parent is None:
+                continue
+            index = parent.index(element)
+            element.remove(child)
+            child.tail = element.tail
+            parent.remove(element)
+            parent.insert(index, child)
+            changed = True
+
+
 def _unwrap_font_elements(root: etree._Element) -> None:
     for element in list(root.xpath("//*[local-name()='font']")):
         parent = element.getparent()
@@ -707,7 +830,7 @@ def _rename_element(element: etree._Element, local_name: str) -> None:
 
 def _classify_blocks(root: etree._Element, document_role: str) -> None:
     after_boundary = True
-    is_front_matter = document_role in {"front", "title", "works"}
+    is_front_matter = document_role in {"dedication", "front", "title", "works"}
     title_line_index = 0
     metadata_line_index = 0
     opening_epigraph = False
@@ -749,7 +872,8 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
             continue
 
         if local == "blockquote":
-            _replace_classes(element, "eo-blockquote")
+            role = _blockquote_role(source_classes, document_role)
+            _replace_classes(element, role)
             after_boundary = True
             continue
 
@@ -799,6 +923,13 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
                 _replace_classes(element, role)
                 after_boundary = True
                 continue
+            if document_role == "dedication":
+                role = _dedication_line_role(element, after_boundary)
+                if role == "eo-front":
+                    _rename_element(element, "h1")
+                _replace_classes(element, role)
+                after_boundary = True
+                continue
             if (
                 after_boundary
                 and not is_front_matter
@@ -841,6 +972,8 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
                 role = _metadata_div_role(element, metadata_line_index)
                 if role != "eo-metadata-page":
                     metadata_line_index += 1
+            elif document_role == "dedication":
+                role = _dedication_line_role(element, after_boundary)
             else:
                 container_role = _container_role(source_classes)
                 role = container_role or _anonymous_div_role(element, after_boundary, document_role)
@@ -1044,9 +1177,9 @@ def _paragraph_role(
         return "eo-scene-break"
     if classes & {"caption", "figcaption"}:
         return "eo-caption"
-    if classes & {"center", "center0", "bl_center"}:
+    if classes & {"center", "center0", "bl_center", "eo-centered"}:
         return "eo-centered"
-    if classes & {"right", "bl_right", "attribution"}:
+    if classes & {"right", "bl_right", "attribution", "eo-right"}:
         return "eo-right"
     if classes & {"poem", "poetry", "verse", "line", "stanza"}:
         return "eo-poetry"
@@ -1061,6 +1194,27 @@ def _paragraph_role(
     if is_front_matter:
         return "eo-front-body"
     return "eo-body"
+
+
+def _blockquote_role(classes: set[str], document_role: str) -> str:
+    if document_role == "dedication":
+        return "eo-dedication"
+    if "eo-right" in classes:
+        return "eo-right"
+    if "eo-centered" in classes:
+        return "eo-centered"
+    return "eo-blockquote"
+
+
+def _dedication_line_role(element: etree._Element, after_boundary: bool) -> str:
+    if _contains_direct_image(element):
+        return "eo-image"
+    if _is_scene_break(element):
+        return "eo-scene-break"
+    text = _normalized_text(element)
+    if after_boundary and text.lower() in {"dedication", "dedicated to"}:
+        return "eo-front"
+    return "eo-dedication"
 
 
 def _is_opening_epigraph_paragraph(element: etree._Element) -> bool:
@@ -1230,6 +1384,10 @@ def _contains_credit_label_before(element: etree._Element) -> bool:
 def _container_role(classes: set[str]) -> str | None:
     if classes & {"part"}:
         return "eo-part"
+    if "eo-right" in classes:
+        return "eo-right"
+    if "eo-centered" in classes:
+        return "eo-centered"
     if classes & {"cover", "titlepage", "dis_img"}:
         return "eo-image"
     if classes & {"block", "textbox", "abstract", "epigraph"}:
@@ -1410,7 +1568,11 @@ def _toc_entry_role(
         return "eo-toc-heading"
     if classes & {"toc_part", "eo-toc-part"} or _looks_like_toc_part(element, text):
         return "eo-toc-part"
-    if classes & {"toc_chap", "toc_sub", "eo-toc-chapter"} or _contains_chapterish_link(element):
+    if (
+        classes & {"toc_chap", "toc_sub", "eo-toc-chapter"}
+        or _contains_chapterish_link(element)
+        or _looks_like_chapterish_label(text)
+    ):
         return "eo-toc-chapter"
     return "eo-toc-entry"
 
@@ -1427,6 +1589,8 @@ def _is_toc_separator(text: str) -> bool:
 def _looks_like_toc_part(element: etree._Element, text: str) -> bool:
     if not _contains_link(element):
         return False
+    if text.lower().startswith("part "):
+        return True
     words = text.split()
     letters = [char for char in text if char.isalpha()]
     return len(words) <= 4 and (not letters or all(char.upper() == char for char in letters))
@@ -1442,6 +1606,15 @@ def _contains_chapterish_link(element: etree._Element) -> bool:
         ):
             return True
     return False
+
+
+def _looks_like_chapterish_label(text: str) -> bool:
+    lower_text = text.lower()
+    return (
+        lower_text.startswith("chapter ")
+        or lower_text.startswith("part ")
+        or lower_text in {"prologue", "epilogue", "introduction", "preface"}
+    )
 
 
 def _has_numbered_content_token(value: str, prefix: str) -> bool:

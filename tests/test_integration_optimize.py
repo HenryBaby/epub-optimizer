@@ -107,6 +107,36 @@ def test_optimize_toc_entries(tmp_path: Path) -> None:
     assert '<p class="eo-toc"' not in toc
 
 
+def test_optimize_opaque_front_matter_and_blockquote_alignment(tmp_path: Path) -> None:
+    source = tmp_path / "opaque-front.epub"
+    _write_opaque_front_matter_epub(source)
+
+    result = optimize_epub(source, tmp_path / "out-opaque-front")
+
+    with zipfile.ZipFile(result.output_path) as archive:
+        contents = archive.read("OEBPS/split003.xhtml").decode("utf-8")
+        dedication = archive.read("OEBPS/split002.xhtml").decode("utf-8")
+        chapter = archive.read("OEBPS/split009.xhtml").decode("utf-8")
+        css = archive.read("OEBPS/Styles/epub-optimizer.css").decode("utf-8")
+
+    assert '<h1 class="eo-toc-heading">Contents</h1>' in contents
+    assert '<p class="eo-toc-entry"><a href="split002.xhtml">Dedication</a></p>' in contents
+    assert '<p class="eo-toc-part"><a href="split008.xhtml">Part One</a></p>' in contents
+    assert '<p class="eo-toc-chapter"><a href="split009.xhtml">Chapter One</a></p>' in contents
+    assert 'class="eo-first">Contents' not in contents
+
+    assert '<h1 class="eo-front"><a href="split003.xhtml">Dedication</a></h1>' in dedication
+    assert dedication.count('class="eo-dedication"') == 2
+    assert (
+        '<blockquote class="eo-dedication"><strong>FOR A FRIEND</strong></blockquote>'
+        in dedication
+    )
+
+    assert chapter.count('class="eo-blockquote"') == 1
+    assert '<blockquote class="eo-right">- SOURCE</blockquote>' in chapter
+    assert "blockquote.eo-right" in css
+
+
 def test_optimize_title_page_layout_roles(tmp_path: Path) -> None:
     source = tmp_path / "title.epub"
     _write_title_page_epub(source)
@@ -494,6 +524,118 @@ def _write_toc_epub(path: Path) -> None:
 <html xmlns="http://www.w3.org/1999/xhtml">
   <head><title>TOC Test</title></head>
   <body><p>Body.</p></body>
+</html>
+""",
+        )
+
+
+def _write_opaque_front_matter_epub(path: Path) -> None:
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr(
+            "mimetype",
+            "application/epub+zip",
+            compress_type=zipfile.ZIP_STORED,
+        )
+        archive.writestr(
+            "META-INF/container.xml",
+            """<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>
+""",
+        )
+        archive.writestr(
+            "OEBPS/content.opf",
+            """<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="id" version="2.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="id">urn:test-opaque-front</dc:identifier>
+    <dc:title>Opaque Front Test</dc:title>
+    <dc:language>en</dc:language>
+  </metadata>
+  <manifest>
+    <item id="style" href="stylesheet.css" media-type="text/css"/>
+    <item id="id2" href="split002.xhtml" media-type="application/xhtml+xml"/>
+    <item id="id3" href="split003.xhtml" media-type="application/xhtml+xml"/>
+    <item id="id9" href="split009.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="id2"/>
+    <itemref idref="id3"/>
+    <itemref idref="id9"/>
+  </spine>
+</package>
+""",
+        )
+        archive.writestr(
+            "OEBPS/stylesheet.css",
+            """.heading { text-align: justify; text-indent: 0; }
+.tocentry { text-align: justify; text-indent: 0; }
+.quoteouter { margin-left: 2em; }
+.quoteinner { margin-left: 2em; }
+.source { text-align: right; text-indent: 0; }
+""",
+        )
+        archive.writestr(
+            "OEBPS/split002.xhtml",
+            """<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <title>Opaque Test</title>
+    <link href="stylesheet.css" rel="stylesheet" type="text/css"/>
+  </head>
+  <body>
+    <p class="heading"><a href="split003.xhtml">Dedication</a></p>
+    <blockquote class="quoteouter">
+      <blockquote class="quoteinner"><strong>FOR A FRIEND</strong></blockquote>
+    </blockquote>
+    <blockquote class="quoteouter">
+      <blockquote class="quoteinner"><em>and everyone else</em></blockquote>
+    </blockquote>
+  </body>
+</html>
+""",
+        )
+        archive.writestr(
+            "OEBPS/split003.xhtml",
+            """<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <title>Opaque Test</title>
+    <link href="stylesheet.css" rel="stylesheet" type="text/css"/>
+  </head>
+  <body>
+    <p class="heading">Contents</p>
+    <p class="tocentry"><a href="split002.xhtml">Dedication</a></p>
+    <p class="tocentry"><a href="intro.xhtml">Introduction</a></p>
+    <p class="tocentry"><a href="note.xhtml">A Note on the Text</a></p>
+    <p class="tocentry"><a href="split008.xhtml">Part One</a></p>
+    <p class="tocentry"><a href="split009.xhtml">Chapter One</a></p>
+  </body>
+</html>
+""",
+        )
+        archive.writestr(
+            "OEBPS/split009.xhtml",
+            """<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <title>Opaque Test</title>
+    <link href="stylesheet.css" rel="stylesheet" type="text/css"/>
+  </head>
+  <body>
+    <p class="heading">CHAPTER ONE</p>
+    <blockquote class="quoteouter">
+      <blockquote class="quoteinner"><em>A chapter opening quotation.</em></blockquote>
+    </blockquote>
+    <blockquote class="quoteouter">
+      <blockquote class="source">- SOURCE</blockquote>
+    </blockquote>
+    <p>First narrative paragraph.</p>
+    <p>Second narrative paragraph.</p>
+  </body>
 </html>
 """,
         )
