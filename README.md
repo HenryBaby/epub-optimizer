@@ -50,8 +50,7 @@ running app container long enough to download them.
 
 ## Deploy With Docker Compose
 
-The default Compose file is designed to run the published container image from
-GitHub Container Registry.
+The default Compose file runs the published image from GitHub Container Registry.
 
 ```bash
 docker compose pull
@@ -63,32 +62,6 @@ Then open:
 ```text
 http://localhost:4200
 ```
-
-By default, Compose runs:
-
-```text
-ghcr.io/henrybaby/epub-optimizer:latest
-```
-
-If the package is private, log in to GitHub Container Registry before pulling:
-
-```bash
-echo YOUR_GITHUB_TOKEN | docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-stdin
-```
-
-You can pin a specific published version:
-
-```bash
-EPUB_OPTIMIZER_IMAGE=ghcr.io/henrybaby/epub-optimizer:0.1.31 docker compose up -d
-```
-
-Configuration is handled through environment variables:
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `EPUB_OPTIMIZER_IMAGE` | `ghcr.io/henrybaby/epub-optimizer:latest` | Container image to run. |
-| `EPUB_OPTIMIZER_PORT` | `4200` | Host port for the web UI. |
-| `EPUB_OPTIMIZER_MAX_UPLOAD_MB` | `100` | Maximum upload size per EPUB. |
 
 Optimized downloads are stored in the `epub_optimizer_data` Docker volume so
 they remain available across container restarts. Uploaded source files and
