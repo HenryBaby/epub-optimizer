@@ -5,19 +5,31 @@ const statusTitle = document.querySelector("#status-title");
 const statusDetail = document.querySelector("#status-detail");
 const statusPill = document.querySelector("#status-pill");
 const progressMeter = document.querySelector("#progress-meter");
-const logWindow = document.querySelector("#processing-log");
-const logCount = document.querySelector("#log-count");
+const taskList = document.querySelector("#processing-log");
+const taskCount = document.querySelector("#log-count");
 const resultsPanel = document.querySelector("#results-panel");
 const resultsList = document.querySelector("#results-list");
 const downloadAll = document.querySelector("#download-all");
 const fileSummary = document.querySelector("#file-summary");
 const themeToggle = document.querySelector("#theme-toggle");
 
-let logEntries = 0;
 let queueTotal = 0;
 let queueCompleted = 0;
+const TASKS = [
+  { key: "start", label: "Preparing EPUB files", icon: "start" },
+  { key: "validate", label: "Validating EPUB archives", icon: "validate" },
+  { key: "extract", label: "Extracting EPUB workspaces", icon: "extract" },
+  { key: "resolve", label: "Resolving package documents", icon: "resolve" },
+  { key: "manifest-cleanup", label: "Removing old style and font manifest items", icon: "clean" },
+  { key: "file-cleanup", label: "Deleting old style and font files", icon: "clean" },
+  { key: "documents", label: "Normalizing content documents", icon: "process" },
+  { key: "package", label: "Repackaging optimized EPUBs", icon: "package" },
+  { key: "complete", label: "Completing optimized EPUBs", icon: "complete" },
+];
+const taskRows = new Map();
 
 initializeTheme();
+initializeTasks();
 updateFileSummary();
 
 themeToggle.addEventListener("change", () => {
@@ -61,7 +73,7 @@ form.addEventListener("submit", async (event) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Optimization failed unexpectedly.";
     setStatus("Processing failed", message, "Error");
-    appendLog("Error", message, "error");
+    showTaskError(message);
   } finally {
     setBusy(false);
   }
@@ -98,12 +110,15 @@ async function readEventStream(stream) {
 function handleEvent(event) {
   if (event.type === "file_start") {
     setStatus("Optimizing", `${event.filename} (${event.index} of ${event.total})`, "Active");
-    appendLog(event.filename, "Started optimization.");
+    updateTask("start", event.index, event.total);
     return;
   }
 
   if (event.type === "log") {
-    appendLog(event.filename, event.message);
+    const activity = activityForOptimizerMessage(event.message);
+    if (activity) {
+      updateTask(activity.key, event.index, event.total);
+    }
     return;
   }
 
@@ -111,7 +126,7 @@ function handleEvent(event) {
     queueCompleted += 1;
     updateProgress();
     setStatus("Optimizing", `Finished ${event.filename}.`, "Active");
-    appendLog(event.filename, `Completed in ${event.elapsed_seconds.toFixed(2)} seconds.`);
+    updateTask("complete", event.index, event.total);
     appendResult(event);
     return;
   }
@@ -120,13 +135,13 @@ function handleEvent(event) {
     queueCompleted += 1;
     updateProgress();
     setStatus("Processing error", event.filename, "Error");
-    appendLog(event.filename, event.message, "error");
+    showTaskError(event.message, event);
     return;
   }
 
   if (event.type === "error") {
     setStatus("Processing error", event.message, "Error");
-    appendLog("Error", event.message, "error");
+    showTaskError(event.message);
     return;
   }
 
@@ -145,22 +160,103 @@ function handleEvent(event) {
   }
 }
 
-function appendLog(filename, message, level = "info") {
-  const item = document.createElement("li");
-  item.className = `log-${level}`;
+function initializeTasks() {
+  taskList.replaceChildren();
+  taskRows.clear();
+  for (const task of TASKS) {
+    const row = createTaskRow(task);
+    taskRows.set(task.key, row);
+    taskList.append(row.item);
+  }
+  updateTaskSummary();
+}
 
-  const label = document.createElement("span");
-  label.className = "log-label";
-  label.textContent = filename;
+function createTaskRow(task) {
+  const item = document.createElement("div");
+  item.className = "task-row task-idle";
+
+  const icon = document.createElement("span");
+  icon.className = `task-icon log-icon-${task.icon}`;
+  icon.setAttribute("aria-hidden", "true");
 
   const text = document.createElement("span");
-  text.textContent = message;
+  text.className = "task-message";
+  text.textContent = task.label;
 
-  item.append(label, text);
-  logWindow.append(item);
-  logEntries += 1;
-  logCount.textContent = `${logEntries} ${logEntries === 1 ? "entry" : "entries"}`;
-  logWindow.scrollTop = logWindow.scrollHeight;
+  const state = document.createElement("span");
+  state.className = "task-state";
+  state.textContent = "Pending";
+
+  const progress = document.createElement("span");
+  progress.className = "task-progress";
+  progress.textContent = "0 of 0";
+
+  item.append(icon, text, state, progress);
+  return { item, progress, state };
+}
+
+function updateTask(key, index, total) {
+  const row = taskRows.get(key);
+  if (!row) {
+    return;
+  }
+  row.item.className = index >= total ? "task-row task-complete" : "task-row task-active";
+  row.state.textContent = index >= total ? "Done" : "Active";
+  row.progress.textContent = `${index} of ${total}`;
+  updateTaskSummary();
+}
+
+function showTaskError(message, event = null) {
+  let row = taskRows.get("error");
+  if (!row) {
+    const task = { key: "error", label: message, icon: "error" };
+    row = createTaskRow(task);
+    taskRows.set("error", row);
+    taskList.append(row.item);
+  }
+  row.item.className = "task-row task-error";
+  row.state.textContent = "Error";
+  row.progress.textContent =
+    event && Number.isInteger(event.index) && Number.isInteger(event.total)
+      ? `${event.index} of ${event.total}`
+      : "Review";
+  updateTaskSummary();
+}
+
+function updateTaskSummary() {
+  const active = Array.from(taskRows.values()).filter((row) =>
+    row.item.classList.contains("task-active") || row.item.classList.contains("task-complete"),
+  ).length;
+  taskCount.textContent = `${active} of ${TASKS.length} active`;
+}
+
+function activityForOptimizerMessage(message) {
+  const normalized = message.toLowerCase();
+  if (normalized.includes("validated epub archive")) {
+    return { key: "validate", message: "Validating EPUB archives" };
+  }
+  if (normalized.includes("extracted epub")) {
+    return { key: "extract", message: "Extracting EPUB workspaces" };
+  }
+  if (normalized.includes("resolved opf package")) {
+    return { key: "resolve", message: "Resolving package documents" };
+  }
+  if (normalized.includes("removed") && normalized.includes("manifest")) {
+    return { key: "manifest-cleanup", message: "Removing old style and font manifest items" };
+  }
+  if (normalized.includes("deleted") && normalized.includes("style/font file")) {
+    return { key: "file-cleanup", message: "Deleting old style and font files" };
+  }
+  if (normalized.includes("processed") && normalized.includes("content document")) {
+    return { key: "documents", message: "Normalizing content documents" };
+  }
+  if (normalized.includes("repackaged optimized epub")) {
+    return { key: "package", message: "Repackaging optimized EPUBs" };
+  }
+  if (normalized.includes("finished in")) {
+    return null;
+  }
+  return { key: `step:${message}`, message };
 }
 
 function appendResult(event) {
@@ -208,7 +304,6 @@ function appendResult(event) {
   addStat(stats, "Documents", event.content_documents_processed);
   addStat(stats, "Stylesheets", event.stylesheets_replaced);
   addStat(stats, "Images", event.images_preserved);
-  addStat(stats, "Time", `${event.elapsed_seconds.toFixed(2)} seconds`);
   details.append(stats);
 
   if (event.warnings && event.warnings.length > 0) {
@@ -243,10 +338,8 @@ function addStat(container, labelText, valueText) {
 }
 
 function resetRun() {
-  logEntries = 0;
-  logWindow.replaceChildren();
+  initializeTasks();
   resultsList.replaceChildren();
-  logCount.textContent = "0 entries";
   resultsPanel.hidden = true;
   downloadAll.hidden = true;
   downloadAll.removeAttribute("href");

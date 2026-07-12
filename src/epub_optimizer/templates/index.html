@@ -28,7 +28,7 @@
           <div class="panel-heading">
             <div>
               <h2>Queue EPUBs</h2>
-              <p>Upload one or more files and process them in order.</p>
+              <p>Upload one/multiple files and process them.</p>
             </div>
             <span class="limit-badge">{{ max_upload_mb }} MB max</span>
           </div>
@@ -67,10 +67,10 @@
           </div>
 
           <div class="log-heading">
-            <h3>Processing log</h3>
-            <span id="log-count">0 entries</span>
+            <h3>Processing tasks</h3>
+            <span id="log-count">0 of 9 active</span>
           </div>
-          <ol id="processing-log" class="log-window"></ol>
+          <div id="processing-log" class="task-list" role="status" aria-live="polite"></div>
         </div>
       </section>
 
