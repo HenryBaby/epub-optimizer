@@ -268,6 +268,21 @@ form {
   gap: 16px;
 }
 
+.upload-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.folder-input {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
 .dropzone {
   display: grid;
   grid-template-columns: 44px minmax(0, 1fr);

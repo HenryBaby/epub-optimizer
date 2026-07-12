@@ -38,7 +38,7 @@
             <label class="dropzone" for="files">
               <span class="dropzone-icon" aria-hidden="true">+</span>
               <span>
-                <strong>Select EPUB files</strong>
+                <strong>Select EPUB files or a folder</strong>
                 <small id="file-summary">No files selected</small>
               </span>
               <input
@@ -47,10 +47,20 @@
                 type="file"
                 accept=".epub,application/epub+zip"
                 multiple
-                required
               >
             </label>
-            <button id="optimize-button" type="submit">Optimize EPUB</button>
+            <input
+              id="folder"
+              class="folder-input"
+              type="file"
+              webkitdirectory
+              directory
+              multiple
+            >
+            <div class="upload-actions">
+              <button id="optimize-button" type="submit">Optimize EPUB</button>
+              <label class="button secondary" for="folder">Choose folder</label>
+            </div>
           </form>
         </div>
 
