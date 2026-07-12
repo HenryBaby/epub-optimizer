@@ -169,19 +169,36 @@ function appendResult(event) {
   const item = document.createElement("article");
   item.className = "result-item";
 
-  const header = document.createElement("div");
-  header.className = "result-header";
+  const row = document.createElement("div");
+  row.className = "result-row";
+
+  const status = document.createElement("span");
+  status.className = "result-status";
+  status.textContent = "OK";
 
   const title = document.createElement("h3");
   title.textContent = event.output_filename;
 
+  const time = document.createElement("span");
+  time.className = "result-time";
+  time.textContent = `${event.elapsed_seconds.toFixed(2)}s`;
+
+  const detailsToggle = document.createElement("button");
+  detailsToggle.className = "details-toggle";
+  detailsToggle.type = "button";
+  detailsToggle.textContent = "Details";
+
   const download = document.createElement("a");
   download.className = "button";
   download.href = event.download_url;
-  download.textContent = "Download EPUB";
+  download.textContent = "Download";
 
-  header.append(title, download);
-  item.append(header);
+  row.append(status, title, time, detailsToggle, download);
+  item.append(row);
+
+  const details = document.createElement("div");
+  details.className = "result-details";
+  details.hidden = true;
 
   const stats = document.createElement("dl");
   stats.className = "stats";
@@ -192,7 +209,7 @@ function appendResult(event) {
   addStat(stats, "Stylesheets", event.stylesheets_replaced);
   addStat(stats, "Images", event.images_preserved);
   addStat(stats, "Time", `${event.elapsed_seconds.toFixed(2)} seconds`);
-  item.append(stats);
+  details.append(stats);
 
   if (event.warnings && event.warnings.length > 0) {
     const warnings = document.createElement("ul");
@@ -202,9 +219,16 @@ function appendResult(event) {
       warningItem.textContent = warning;
       warnings.append(warningItem);
     }
-    item.append(warnings);
+    details.append(warnings);
   }
 
+  detailsToggle.addEventListener("click", () => {
+    const isHidden = details.hidden;
+    details.hidden = !isHidden;
+    detailsToggle.textContent = isHidden ? "Hide" : "Details";
+  });
+
+  item.append(details);
   resultsList.append(item);
 }
 
