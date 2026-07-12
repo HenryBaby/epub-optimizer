@@ -2,9 +2,18 @@ import json
 import zipfile
 from io import BytesIO
 
+import pytest
 from fastapi.testclient import TestClient
 
 from epub_optimizer.web import app
+
+
+@pytest.fixture(autouse=True)
+def output_base_dir(tmp_path):
+    app.state.output_base_dir = tmp_path
+    yield
+    if hasattr(app.state, "output_base_dir"):
+        del app.state.output_base_dir
 
 
 def test_homepage_renders() -> None:
@@ -25,8 +34,7 @@ def test_homepage_renders() -> None:
     assert "/static/app.js" in response.text
 
 
-def test_streaming_optimize_handles_url_significant_filename_chars(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("EPUB_OPTIMIZER_OUTPUT_DIR", str(tmp_path))
+def test_streaming_optimize_handles_url_significant_filename_chars() -> None:
     client = TestClient(app)
 
     response = client.post(
@@ -57,8 +65,7 @@ def test_streaming_optimize_handles_url_significant_filename_chars(tmp_path, mon
     assert download.headers["content-type"] == "application/epub+zip"
 
 
-def test_streaming_optimize_accepts_multiple_files(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("EPUB_OPTIMIZER_OUTPUT_DIR", str(tmp_path))
+def test_streaming_optimize_accepts_multiple_files() -> None:
     client = TestClient(app)
 
     response = client.post(

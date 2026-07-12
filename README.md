@@ -63,9 +63,10 @@ Then open:
 http://localhost:4200
 ```
 
-Optimized downloads are stored in the `epub_optimizer_data` Docker volume so
-they remain available across container restarts. Uploaded source files and
-temporary extraction workspaces are still treated as temporary processing data.
+Optimized downloads are written under `/data` in the container. The Compose file
+mounts the `epub_optimizer_data` Docker volume there so downloads remain
+available across container restarts. Uploaded source files and temporary
+extraction workspaces are still treated as temporary processing data.
 
 ## Build Locally With Docker
 

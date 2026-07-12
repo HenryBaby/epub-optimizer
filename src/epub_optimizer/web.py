@@ -21,6 +21,7 @@ from epub_optimizer.core import optimize_epub, optimized_filename
 from epub_optimizer.errors import EpubOptimizerError
 
 BASE_DIR = Path(__file__).resolve().parent
+OUTPUT_BASE_DIR = Path("/data")
 MAX_UPLOAD_MB = int(os.getenv("EPUB_OPTIMIZER_MAX_UPLOAD_MB", "100"))
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 
@@ -278,4 +279,5 @@ def _render_error(request: Request, message: str) -> HTMLResponse:
 
 
 def _persistent_output_dir() -> Path:
-    return Path(os.getenv("EPUB_OPTIMIZER_OUTPUT_DIR", tempfile.gettempdir())) / "epub-optimizer"
+    output_base = getattr(app.state, "output_base_dir", OUTPUT_BASE_DIR)
+    return Path(output_base) / "epub-optimizer"
