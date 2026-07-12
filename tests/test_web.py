@@ -1,4 +1,4 @@
-import re
+import json
 import zipfile
 from io import BytesIO
 
@@ -14,17 +14,21 @@ def test_homepage_renders() -> None:
 
     assert response.status_code == 200
     assert "EPUB Optimizer" in response.text
-    assert "v0.1.23" in response.text
+    assert "v0.1.24" in response.text
+    assert 'id="optimizer-form"' in response.text
+    assert 'name="files"' in response.text
+    assert "multiple" in response.text
+    assert "/static/app.js" in response.text
 
 
-def test_download_link_handles_url_significant_filename_chars(tmp_path, monkeypatch) -> None:
+def test_streaming_optimize_handles_url_significant_filename_chars(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("EPUB_OPTIMIZER_OUTPUT_DIR", str(tmp_path))
     client = TestClient(app)
 
     response = client.post(
         "/optimize",
         files={
-            "file": (
+            "files": (
                 "Book #01.epub",
                 _minimal_epub_bytes(),
                 "application/epub+zip",
@@ -33,14 +37,51 @@ def test_download_link_handles_url_significant_filename_chars(tmp_path, monkeypa
     )
 
     assert response.status_code == 200
-    match = re.search(r'href="(/download/[^"]+)"', response.text)
-    assert match is not None
-    assert "%23" in match.group(1)
+    assert response.headers["content-type"].startswith("application/x-ndjson")
+    events = [json.loads(line) for line in response.text.splitlines() if line.strip()]
+    complete = next(event for event in events if event["type"] == "file_complete")
+    assert "%23" in complete["download_url"]
+    assert any(event["type"] == "log" for event in events)
+    assert events[-1] == {"type": "complete", "successful": 1, "failed": 0}
 
-    download = client.get(match.group(1))
+    download = client.get(complete["download_url"])
 
     assert download.status_code == 200
     assert download.headers["content-type"] == "application/epub+zip"
+
+
+def test_streaming_optimize_accepts_multiple_files(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("EPUB_OPTIMIZER_OUTPUT_DIR", str(tmp_path))
+    client = TestClient(app)
+
+    response = client.post(
+        "/optimize",
+        files=[
+            (
+                "files",
+                (
+                    "First.epub",
+                    _minimal_epub_bytes(),
+                    "application/epub+zip",
+                ),
+            ),
+            (
+                "files",
+                (
+                    "Second.epub",
+                    _minimal_epub_bytes(),
+                    "application/epub+zip",
+                ),
+            ),
+        ],
+    )
+
+    assert response.status_code == 200
+    events = [json.loads(line) for line in response.text.splitlines() if line.strip()]
+    completed = [event for event in events if event["type"] == "file_complete"]
+
+    assert [event["filename"] for event in completed] == ["First.epub", "Second.epub"]
+    assert events[-1] == {"type": "complete", "successful": 2, "failed": 0}
 
 
 def _minimal_epub_bytes() -> bytes:

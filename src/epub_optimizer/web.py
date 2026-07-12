@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import os
 import tempfile
+import uuid
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Annotated
+from urllib.parse import quote
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -37,46 +42,12 @@ def index(request: Request) -> HTMLResponse:
     )
 
 
-@app.post("/optimize", response_class=HTMLResponse)
-async def optimize(request: Request, file: Annotated[UploadFile, File()]) -> HTMLResponse:
-    original_name = Path(file.filename or "").name
-    if not original_name.lower().endswith(".epub"):
-        return _render_error(request, "Please upload a file with the .epub extension.")
-
-    with tempfile.TemporaryDirectory(prefix="epub-optimizer-web-") as temp_name:
-        temp_dir = Path(temp_name)
-        upload_path = temp_dir / original_name
-        output_dir = temp_dir / "output"
-        output_dir.mkdir()
-
-        try:
-            await _save_upload(file, upload_path)
-            result = optimize_epub(
-                upload_path,
-                output_dir,
-                output_filename=optimized_filename(original_name),
-                max_size_bytes=MAX_UPLOAD_BYTES,
-            )
-            download_token = result.output_filename
-            persistent_output = _persistent_output_dir()
-            persistent_output.mkdir(parents=True, exist_ok=True)
-            final_output = persistent_output / download_token
-            final_output.write_bytes(result.output_path.read_bytes())
-        except EpubOptimizerError as exc:
-            return _render_error(request, str(exc))
-        except Exception:
-            return _render_error(request, "Optimization failed unexpectedly.")
-
-    return templates.TemplateResponse(
-        request,
-        "index.html",
-        {
-            "app_version": __version__,
-            "max_upload_mb": MAX_UPLOAD_MB,
-            "result": result,
-            "download_name": download_token,
-            "error": None,
-        },
+@app.post("/optimize")
+async def optimize(files: Annotated[list[UploadFile], File()]) -> StreamingResponse:
+    return StreamingResponse(
+        _optimization_events(files),
+        media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-store"},
     )
 
 
@@ -97,6 +68,164 @@ async def _save_upload(file: UploadFile, target: Path) -> None:
             if total > MAX_UPLOAD_BYTES:
                 raise EpubOptimizerError(f"Upload exceeds the {MAX_UPLOAD_MB} MB limit.")
             output.write(chunk)
+
+
+async def _optimization_events(files: list[UploadFile]) -> AsyncIterator[str]:
+    if not files:
+        yield _json_event("error", message="Please upload at least one EPUB file.")
+        return
+
+    with tempfile.TemporaryDirectory(prefix="epub-optimizer-web-") as temp_name:
+        temp_dir = Path(temp_name)
+        upload_dir = temp_dir / "uploads"
+        output_dir = temp_dir / "output"
+        upload_dir.mkdir()
+        output_dir.mkdir()
+
+        uploads: list[tuple[str, Path]] = []
+        for index, file in enumerate(files, start=1):
+            original_name = Path(file.filename or "").name
+            if not original_name.lower().endswith(".epub"):
+                yield _json_event(
+                    "file_error",
+                    index=index,
+                    total=len(files),
+                    filename=original_name or "Unknown file",
+                    message="Please upload a file with the .epub extension.",
+                )
+                continue
+
+            upload_path = upload_dir / f"{index}-{uuid.uuid4().hex}.epub"
+            try:
+                await _save_upload(file, upload_path)
+            except EpubOptimizerError as exc:
+                yield _json_event(
+                    "file_error",
+                    index=index,
+                    total=len(files),
+                    filename=original_name,
+                    message=str(exc),
+                )
+                continue
+            uploads.append((original_name, upload_path))
+
+        if not uploads:
+            yield _json_event("complete", successful=0, failed=len(files))
+            return
+
+        failed = len(files) - len(uploads)
+        successful = 0
+        persistent_output = _persistent_output_dir()
+        persistent_output.mkdir(parents=True, exist_ok=True)
+
+        for index, (original_name, upload_path) in enumerate(uploads, start=1):
+            yield _json_event("file_start", index=index, total=len(uploads), filename=original_name)
+            queue: asyncio.Queue[dict[str, object]] = asyncio.Queue()
+            loop = asyncio.get_running_loop()
+
+            def report(
+                message: str,
+                *,
+                event_loop: asyncio.AbstractEventLoop = loop,
+                progress_queue: asyncio.Queue[dict[str, object]] = queue,
+                file_index: int = index,
+                file_total: int = len(uploads),
+                file_name: str = original_name,
+            ) -> None:
+                event_loop.call_soon_threadsafe(
+                    progress_queue.put_nowait,
+                    {
+                        "type": "log",
+                        "index": file_index,
+                        "total": file_total,
+                        "filename": file_name,
+                        "message": message,
+                    },
+                )
+
+            task = asyncio.create_task(
+                asyncio.to_thread(
+                    optimize_epub,
+                    upload_path,
+                    output_dir,
+                    output_filename=optimized_filename(original_name),
+                    max_size_bytes=MAX_UPLOAD_BYTES,
+                    progress=report,
+                )
+            )
+
+            while not task.done() or not queue.empty():
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=0.1)
+                except TimeoutError:
+                    continue
+                yield _json_line(event)
+
+            try:
+                result = await task
+                download_name = _unique_download_name(persistent_output, result.output_filename)
+                final_output = persistent_output / download_name
+                final_output.write_bytes(result.output_path.read_bytes())
+                yield _json_event(
+                    "file_complete",
+                    index=index,
+                    total=len(uploads),
+                    filename=original_name,
+                    output_filename=result.output_filename,
+                    download_name=download_name,
+                    download_url=f"/download/{quote(download_name)}",
+                    elapsed_seconds=round(result.elapsed_seconds, 2),
+                    epub_version=result.epub_version,
+                    package_path=result.package_path,
+                    content_documents_processed=result.content_documents_processed,
+                    stylesheets_replaced=result.stylesheets_replaced,
+                    images_preserved=result.images_preserved,
+                    warnings=result.warnings,
+                )
+                successful += 1
+            except EpubOptimizerError as exc:
+                failed += 1
+                yield _json_event(
+                    "file_error",
+                    index=index,
+                    total=len(uploads),
+                    filename=original_name,
+                    message=str(exc),
+                )
+            except Exception:
+                failed += 1
+                yield _json_event(
+                    "file_error",
+                    index=index,
+                    total=len(uploads),
+                    filename=original_name,
+                    message="Optimization failed unexpectedly.",
+                )
+
+        yield _json_event("complete", successful=successful, failed=failed)
+
+
+def _unique_download_name(output_dir: Path, filename: str) -> str:
+    safe_name = Path(filename).name
+    candidate = safe_name
+    path = output_dir / candidate
+    suffix = Path(safe_name).suffix
+    stem = Path(safe_name).stem
+    counter = 2
+    while path.exists():
+        candidate = f"{stem}-{counter}{suffix}"
+        path = output_dir / candidate
+        counter += 1
+    return candidate
+
+
+def _json_event(event_type: str, **payload: object) -> str:
+    payload["type"] = event_type
+    return _json_line(payload)
+
+
+def _json_line(payload: dict[str, object]) -> str:
+    return json.dumps(payload, ensure_ascii=False) + "\n"
 
 
 def _render_error(request: Request, message: str) -> HTMLResponse:

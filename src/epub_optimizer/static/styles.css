@@ -91,6 +91,11 @@ button,
   cursor: pointer;
 }
 
+button:disabled {
+  background: #6d7773;
+  cursor: not-allowed;
+}
+
 .hint {
   color: #656d76;
   font-size: 14px;
@@ -146,6 +151,67 @@ dd {
   color: #7a4b00;
 }
 
+.progress {
+  margin-top: 20px;
+}
+
+.log-window {
+  height: 260px;
+  margin: 0;
+  padding: 12px 12px 12px 34px;
+  overflow-y: auto;
+  border: 1px solid #d8d8d0;
+  border-radius: 6px;
+  background: #fafaf8;
+}
+
+.log-window li {
+  padding: 2px 0;
+}
+
+.log-window li + li {
+  margin-top: 4px;
+}
+
+.log-window .log-error {
+  color: #a13b2b;
+}
+
+.log-label {
+  display: inline-block;
+  max-width: 260px;
+  margin-right: 8px;
+  overflow: hidden;
+  color: #4d5761;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  white-space: nowrap;
+}
+
+.log-label::after {
+  content: ":";
+}
+
+.results-list {
+  display: grid;
+  gap: 16px;
+}
+
+.result-item {
+  border-top: 1px solid #e0e0d8;
+  padding-top: 16px;
+}
+
+.result-item:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.result-item h3 {
+  margin: 0;
+}
+
 @media (max-width: 640px) {
   .shell {
     margin: 20px auto;
@@ -157,5 +223,11 @@ dd {
 
   .button {
     margin-top: 8px;
+  }
+
+  .log-label {
+    display: block;
+    max-width: 100%;
+    margin-right: 0;
   }
 }

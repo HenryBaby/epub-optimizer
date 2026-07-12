@@ -4,6 +4,7 @@ import posixpath
 import re
 import tempfile
 import time
+from collections.abc import Callable
 from pathlib import Path, PurePosixPath
 from urllib.parse import unquote, urlsplit
 
@@ -102,6 +103,7 @@ def optimize_epub(
     *,
     output_filename: str | None = None,
     max_size_bytes: int | None = None,
+    progress: Callable[[str], None] | None = None,
 ) -> OptimizationResult:
     started = time.perf_counter()
     log: list[str] = []
@@ -112,19 +114,19 @@ def optimize_epub(
     output_filename = output_filename or optimized_filename(input_path.name)
     output_path = output_dir / output_filename
 
-    log.append("Validated EPUB archive.")
+    _append_log(log, "Validated EPUB archive.", progress)
     validate_epub_archive(input_path, max_size_bytes=max_size_bytes)
 
     with tempfile.TemporaryDirectory(prefix="epub-optimizer-") as temp_name:
         work_dir = Path(temp_name)
         extract_epub(input_path, work_dir)
-        log.append("Extracted EPUB into a temporary workspace.")
+        _append_log(log, "Extracted EPUB into a temporary workspace.", progress)
 
         package_path = find_package_document(work_dir)
         package_file = work_dir / Path(*PurePosixPath(package_path).parts)
         package_dir = posixpath.dirname(package_path)
         package_dir_path = package_file.parent
-        log.append(f"Resolved OPF package document: {package_path}")
+        _append_log(log, f"Resolved OPF package document: {package_path}", progress)
 
         package_tree = _parse_xml(package_file)
         package_root = package_tree.getroot()
@@ -156,9 +158,13 @@ def optimize_epub(
             canonical_item_href,
         )
         removed_files = _delete_package_files(work_dir, package_dir, removable_hrefs)
-        log.append(f"Removed {stylesheets_replaced} old style/font manifest item(s).")
+        _append_log(
+            log,
+            f"Removed {stylesheets_replaced} old style/font manifest item(s).",
+            progress,
+        )
         if removed_files:
-            log.append(f"Deleted {removed_files} old style/font file(s).")
+            _append_log(log, f"Deleted {removed_files} old style/font file(s).", progress)
 
         processed_docs = 0
         for item in content_items:
@@ -180,15 +186,15 @@ def optimize_epub(
 
         normalized_nav = _normalize_navigation_documents(work_dir, package_dir, items)
         if normalized_nav:
-            log.append(f"Normalized {normalized_nav} navigation document(s).")
+            _append_log(log, f"Normalized {normalized_nav} navigation document(s).", progress)
 
-        log.append(f"Processed {processed_docs} content document(s).")
+        _append_log(log, f"Processed {processed_docs} content document(s).", progress)
         _write_xml(package_tree, package_file)
         write_epub(work_dir, output_path)
-        log.append("Repackaged optimized EPUB.")
+        _append_log(log, "Repackaged optimized EPUB.", progress)
 
     elapsed = time.perf_counter() - started
-    log.append(f"Finished in {elapsed:.2f} seconds.")
+    _append_log(log, f"Finished in {elapsed:.2f} seconds.", progress)
 
     return OptimizationResult(
         input_filename=input_path.name,
@@ -203,6 +209,16 @@ def optimize_epub(
         warnings=warnings,
         log=log,
     )
+
+
+def _append_log(
+    log: list[str],
+    message: str,
+    progress: Callable[[str], None] | None,
+) -> None:
+    log.append(message)
+    if progress is not None:
+        progress(message)
 
 
 def optimized_filename(filename: str) -> str:
