@@ -23,7 +23,7 @@ def test_homepage_renders() -> None:
 
     assert response.status_code == 200
     assert "EPUB Optimizer" in response.text
-    assert "v0.1.31" in response.text
+    assert "v0.1.32" in response.text
     assert 'id="optimizer-form"' in response.text
     assert 'name="files"' in response.text
     assert "multiple" in response.text
@@ -63,6 +63,10 @@ def test_streaming_optimize_handles_url_significant_filename_chars() -> None:
 
     assert download.status_code == 200
     assert download.headers["content-type"] == "application/epub+zip"
+
+    expired_download = client.get(complete["download_url"])
+
+    assert expired_download.status_code == 404
 
 
 def test_streaming_optimize_accepts_multiple_files() -> None:
@@ -109,6 +113,10 @@ def test_streaming_optimize_accepts_multiple_files() -> None:
         names = archive.namelist()
 
     assert names == ["First-optimized.epub", "Second-optimized.epub"]
+
+    expired_archive = client.get(events[-1]["batch_download_url"])
+
+    assert expired_archive.status_code == 404
 
 
 def _minimal_epub_bytes() -> bytes:

@@ -7,6 +7,7 @@ import tempfile
 import uuid
 import zipfile
 from collections.abc import AsyncIterator
+from contextlib import suppress
 from pathlib import Path
 from typing import Annotated
 from urllib.parse import quote
@@ -15,6 +16,7 @@ from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.background import BackgroundTask
 
 from epub_optimizer import __version__
 from epub_optimizer.core import optimize_epub, optimized_filename
@@ -59,7 +61,12 @@ def download(filename: str) -> FileResponse:
     path = _persistent_output_dir() / safe_name
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Optimized EPUB is no longer available.")
-    return FileResponse(path, filename=safe_name, media_type="application/epub+zip")
+    return FileResponse(
+        path,
+        filename=safe_name,
+        media_type="application/epub+zip",
+        background=BackgroundTask(_remove_download, path),
+    )
 
 
 @app.get("/download-archive/{filename}")
@@ -71,7 +78,12 @@ def download_archive(filename: str) -> FileResponse:
             status_code=404,
             detail="Optimized EPUB archive is no longer available.",
         )
-    return FileResponse(path, filename=safe_name, media_type="application/zip")
+    return FileResponse(
+        path,
+        filename=safe_name,
+        media_type="application/zip",
+        background=BackgroundTask(_remove_download, path),
+    )
 
 
 async def _save_upload(file: UploadFile, target: Path) -> None:
@@ -281,3 +293,8 @@ def _render_error(request: Request, message: str) -> HTMLResponse:
 def _persistent_output_dir() -> Path:
     output_base = getattr(app.state, "output_base_dir", OUTPUT_BASE_DIR)
     return Path(output_base) / "epub-optimizer"
+
+
+def _remove_download(path: Path) -> None:
+    with suppress(FileNotFoundError):
+        path.unlink()
