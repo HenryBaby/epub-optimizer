@@ -50,6 +50,29 @@ p.eo-front-section {
   text-transform: uppercase;
 }
 
+.eo-metadata-page {
+  margin: 3em 0 0;
+  text-align: center;
+}
+
+h1.eo-metadata-title,
+p.eo-metadata-title {
+  margin: 1em 0;
+  font-size: 1.1em;
+  line-height: 1.3;
+  font-weight: bold;
+  text-align: center;
+  text-indent: 0;
+}
+
+p.eo-metadata-line {
+  margin: 0.35em 0;
+  font-size: 0.9em;
+  line-height: 1.3;
+  text-align: center;
+  text-indent: 0;
+}
+
 h1,
 h2,
 h3,

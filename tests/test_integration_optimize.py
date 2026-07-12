@@ -175,6 +175,39 @@ def test_optimize_narrative_prologue_uses_body_flow(tmp_path: Path) -> None:
     assert "eo-front-body" not in prologue
 
 
+def test_optimize_narrative_introduction_uses_body_flow(tmp_path: Path) -> None:
+    source = tmp_path / "introduction.epub"
+    _write_narrative_introduction_epub(source)
+
+    result = optimize_epub(source, tmp_path / "out-introduction")
+
+    with zipfile.ZipFile(result.output_path) as archive:
+        introduction = archive.read("OEBPS/introduction.xhtml").decode("utf-8")
+
+    assert '<h1 class="eo-chapter">INTRODUCTION</h1>' in introduction
+    assert '<p class="eo-first">This is the first long introduction paragraph' in introduction
+    assert '<p class="eo-body">This is the second long introduction paragraph' in introduction
+    assert "eo-front-body" not in introduction
+
+
+def test_optimize_metadata_pages_do_not_use_body_flow(tmp_path: Path) -> None:
+    source = tmp_path / "metadata.epub"
+    _write_metadata_page_epub(source)
+
+    result = optimize_epub(source, tmp_path / "out-metadata")
+
+    with zipfile.ZipFile(result.output_path) as archive:
+        info = archive.read("OEBPS/info.xhtml").decode("utf-8")
+        css = archive.read("Styles/epub-optimizer.css").decode("utf-8")
+
+    assert '<p class="eo-metadata-line">Original title: <cite>Example</cite></p>' in info
+    assert '<p class="eo-metadata-line">Digital editor: Example Editor</p>' in info
+    assert '<p class="eo-metadata-line">ePub base r2.1</p>' in info
+    assert "eo-first" not in info
+    assert "eo-body" not in info
+    assert "eo-metadata-line" in css
+
+
 def test_optimize_part_pages_images_empty_blocks_and_ncx(tmp_path: Path) -> None:
     source = tmp_path / "structure.epub"
     _write_structure_cleanup_epub(source)
@@ -660,6 +693,110 @@ def _write_narrative_prologue_epub(path: Path) -> None:
     the same paragraph flow rules as a chapter opening after the epigraph.</p>
     <p>This is the second prose paragraph in that same prologue. It should continue
     the same context as body text and should not be classified as front matter.</p>
+  </body>
+</html>
+""",
+        )
+
+
+def _write_narrative_introduction_epub(path: Path) -> None:
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr(
+            "mimetype",
+            "application/epub+zip",
+            compress_type=zipfile.ZIP_STORED,
+        )
+        archive.writestr(
+            "META-INF/container.xml",
+            """<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>
+""",
+        )
+        archive.writestr(
+            "content.opf",
+            """<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="id" version="3.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="id">urn:test-introduction</dc:identifier>
+    <dc:title>Introduction Test</dc:title>
+    <dc:language>en</dc:language>
+  </metadata>
+  <manifest>
+    <item id="introduction" href="OEBPS/introduction.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="introduction"/>
+  </spine>
+</package>
+""",
+        )
+        archive.writestr(
+            "OEBPS/introduction.xhtml",
+            """<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head><title>Introduction Test</title></head>
+  <body>
+    <h1>INTRODUCTION</h1>
+    <p>This is the first long introduction paragraph, with enough prose to be
+    classified as narrative material rather than compact front matter. It should
+    use the same body flow rules as chapters.</p>
+    <p>This is the second long introduction paragraph, also prose-heavy enough
+    to prove that this document is not a short title, credit, or metadata page.
+    It should continue the introduction body flow.</p>
+  </body>
+</html>
+""",
+        )
+
+
+def _write_metadata_page_epub(path: Path) -> None:
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr(
+            "mimetype",
+            "application/epub+zip",
+            compress_type=zipfile.ZIP_STORED,
+        )
+        archive.writestr(
+            "META-INF/container.xml",
+            """<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>
+""",
+        )
+        archive.writestr(
+            "content.opf",
+            """<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="id" version="3.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="id">urn:test-metadata</dc:identifier>
+    <dc:title>Metadata Test</dc:title>
+    <dc:language>en</dc:language>
+  </metadata>
+  <manifest>
+    <item id="info" href="OEBPS/info.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="info"/>
+  </spine>
+</package>
+""",
+        )
+        archive.writestr(
+            "OEBPS/info.xhtml",
+            """<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head><title>Metadata Test</title></head>
+  <body>
+    <p>Original title: <cite>Example</cite></p>
+    <p>Digital editor: Example Editor</p>
+    <p>ePub base r2.1</p>
   </body>
 </html>
 """,

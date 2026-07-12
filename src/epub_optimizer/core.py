@@ -461,20 +461,36 @@ def _namespaced_tag(element: etree._Element, local_name: str) -> str:
 def _refine_document_role(root: etree._Element, document_role: str) -> str:
     if document_role in {"part", "title", "toc", "works"}:
         return document_role
+    if document_role == "metadata":
+        return "metadata"
+    if _looks_like_metadata_page(root):
+        return "metadata"
     if document_role == "prologue" and _looks_like_narrative_prologue(root):
         return "body"
+    if document_role == "introduction" and _looks_like_narrative_introduction(root):
+        return "body"
+    if document_role in {"introduction", "prologue"}:
+        return "front"
     if _looks_like_works_list_document(root):
         return "works"
     return document_role
 
 
 def _looks_like_narrative_prologue(root: etree._Element) -> bool:
+    return _looks_like_narrative_named_section(root, {"prologue"})
+
+
+def _looks_like_narrative_introduction(root: etree._Element) -> bool:
+    return _looks_like_narrative_named_section(root, {"introduction", "intro"})
+
+
+def _looks_like_narrative_named_section(root: etree._Element, heading_names: set[str]) -> bool:
     body_blocks = _meaningful_body_blocks(root)
     if len(body_blocks) < 3:
         return False
 
     heading_text = _normalized_text(body_blocks[0]).lower()
-    if "prologue" not in heading_text:
+    if not any(name in heading_text for name in heading_names):
         return False
 
     paragraph_texts = [
@@ -485,9 +501,32 @@ def _looks_like_narrative_prologue(root: etree._Element) -> bool:
     if len(paragraph_texts) < 2:
         return False
 
-    long_paragraphs = sum(1 for text in paragraph_texts if len(text) > 180)
+    long_paragraphs = sum(1 for text in paragraph_texts if len(text) > 140)
     short_paragraphs = sum(1 for text in paragraph_texts if _is_short_list_text(text))
     return long_paragraphs >= 2 and long_paragraphs > short_paragraphs
+
+
+def _looks_like_metadata_page(root: etree._Element) -> bool:
+    blocks = [
+        element
+        for element in _meaningful_body_blocks(root)
+        if not _has_block_children(element)
+    ]
+    if not 2 <= len(blocks) <= 14:
+        return False
+
+    texts = [_normalized_text(element) for element in blocks]
+    combined = " ".join(texts).lower()
+    metadata_hits = sum(1 for text in texts if _is_metadata_line_text(text))
+    short_count = sum(1 for text in texts if len(text) <= 90)
+    return (
+        metadata_hits >= 2
+        or (
+            metadata_hits >= 1
+            and short_count / len(texts) >= 0.75
+            and any(token in combined for token in {"epub", "isbn", "copyright", "editor"})
+        )
+    )
 
 
 def _looks_like_works_list_document(root: etree._Element) -> bool:
@@ -670,6 +709,7 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
     after_boundary = True
     is_front_matter = document_role in {"front", "title", "works"}
     title_line_index = 0
+    metadata_line_index = 0
     opening_epigraph = False
     for element in root.xpath("//*[local-name()='body']//*[self::*]"):
         local = etree.QName(element).localname.lower()
@@ -688,6 +728,13 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
                 continue
             if document_role == "works":
                 _replace_classes(element, "eo-front")
+                after_boundary = True
+                opening_epigraph = False
+                continue
+            if document_role == "metadata":
+                role = _metadata_line_role(element, metadata_line_index)
+                metadata_line_index += 1
+                _replace_classes(element, role)
                 after_boundary = True
                 opening_epigraph = False
                 continue
@@ -746,6 +793,12 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
                 _replace_classes(element, role)
                 after_boundary = role in {"eo-front", "eo-front-section", "eo-image"}
                 continue
+            if document_role == "metadata":
+                role = _metadata_line_role(element, metadata_line_index)
+                metadata_line_index += 1
+                _replace_classes(element, role)
+                after_boundary = True
+                continue
             if (
                 after_boundary
                 and not is_front_matter
@@ -784,6 +837,10 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
                     title_line_index += 1
             elif document_role == "works":
                 role = _works_list_div_role(element, after_boundary)
+            elif document_role == "metadata":
+                role = _metadata_div_role(element, metadata_line_index)
+                if role != "eo-metadata-page":
+                    metadata_line_index += 1
             else:
                 container_role = _container_role(source_classes)
                 role = container_role or _anonymous_div_role(element, after_boundary, document_role)
@@ -812,10 +869,12 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
                         "eo-caption",
                         "eo-centered",
                         "eo-extract",
-                        "eo-footnote",
+                    "eo-footnote",
                     "eo-front-list-item",
                     "eo-front-section",
                     "eo-image",
+                    "eo-metadata-line",
+                    "eo-metadata-title",
                         "eo-poetry",
                         "eo-scene-break",
                         "eo-title-author",
@@ -866,6 +925,23 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
                     "eo-image",
                     "eo-scene-break",
                 }
+                continue
+
+        if local == "div" and document_role == "metadata":
+            role = _metadata_div_role(element, metadata_line_index)
+            if role == "eo-metadata-page":
+                _replace_classes(element, role)
+                after_boundary = True
+                continue
+            metadata_line_index += 1
+            if role:
+                if _has_block_children(element):
+                    _replace_classes(element, role)
+                    after_boundary = True
+                    continue
+                _rename_element(element, "p")
+                _replace_classes(element, role)
+                after_boundary = True
                 continue
 
         if local == "div" and document_role == "title":
@@ -1042,6 +1118,26 @@ def _title_div_role(element: etree._Element, line_index: int) -> str:
     if _has_block_children(element):
         return "eo-title-page"
     return _title_page_line_role(element, line_index)
+
+
+def _metadata_div_role(element: etree._Element, line_index: int) -> str:
+    if _has_block_children(element):
+        return "eo-metadata-page"
+    return _metadata_line_role(element, line_index)
+
+
+def _metadata_line_role(element: etree._Element, line_index: int) -> str:
+    if _contains_direct_image(element):
+        return "eo-image"
+    if _is_scene_break(element) or _is_empty_block(element):
+        return "eo-scene-break"
+
+    text = _normalized_text(element)
+    if line_index == 0 and not _is_metadata_line_text(text):
+        return "eo-metadata-title"
+    if etree.QName(element).localname.lower() in {"h1", "h2", "h3"}:
+        return "eo-metadata-title"
+    return "eo-metadata-line"
 
 
 def _title_page_line_role(element: etree._Element, line_index: int) -> str:
@@ -1425,6 +1521,44 @@ def _is_works_category_text(text: str) -> bool:
     )
 
 
+def _is_metadata_line_text(text: str) -> bool:
+    lower_text = text.lower()
+    metadata_tokens = {
+        "base",
+        "book design",
+        "cover art",
+        "copyright",
+        "digital",
+        "edited",
+        "editor",
+        "edition",
+        "epub",
+        "isbn",
+        "original title",
+        "published",
+        "publisher",
+        "release",
+        "rights",
+        "title:",
+        "version",
+    }
+    if any(token in lower_text for token in metadata_tokens):
+        return True
+    if ":" in text and len(text) <= 100:
+        return True
+    return _looks_like_short_date_or_version(text)
+
+
+def _looks_like_short_date_or_version(text: str) -> bool:
+    if len(text) > 40:
+        return False
+    has_digit = any(char.isdigit() for char in text)
+    if not has_digit:
+        return False
+    separators = sum(text.count(separator) for separator in {"-", "/", ".", ":"})
+    return separators >= 1
+
+
 def _is_scene_break(element: etree._Element) -> bool:
     text = _normalized_text(element)
     return text in {"*", "* * *", "***", "****", "*****"}
@@ -1445,8 +1579,12 @@ def _document_role(item: etree._Element) -> str:
         return "title"
     if "title" in values and not any(hint in values for hint in ("subtitle", "entitle")):
         return "title"
+    if any(hint in values for hint in ("colophon", "credits", "creditos", "info")):
+        return "metadata"
     if "prologue" in values:
         return "prologue"
+    if "introduction" in values or "/intro" in values or "intro" in values.split():
+        return "introduction"
     if any(hint in values for hint in FRONT_MATTER_HINTS):
         if "toc" in values or "contents" in values:
             return "toc"
