@@ -35,7 +35,7 @@
             <h2>Optimization complete</h2>
             <p>{{ "%.2f"|format(result.elapsed_seconds) }} seconds</p>
           </div>
-          <a class="button" href="/download/{{ download_name }}">Download EPUB</a>
+          <a class="button" href="/download/{{ download_name|urlencode }}">Download EPUB</a>
         </div>
 
         <dl class="stats">
