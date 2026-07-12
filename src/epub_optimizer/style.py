@@ -18,16 +18,16 @@ body {
 }
 
 p {
-  margin: 0;
+  margin: 0 0 0.75em;
   text-align: justify;
 }
 
 p.eo-body {
-  text-indent: 1em;
+  text-indent: 0;
 }
 
 p.eo-first {
-  text-indent: 0;
+  text-indent: 1em;
 }
 
 p.eo-front-body {

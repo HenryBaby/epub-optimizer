@@ -36,7 +36,11 @@ def test_optimize_minimal_epub(tmp_path: Path) -> None:
     assert 'class="eo-body"' in chapter
     assert 'style="' not in chapter
     assert 'class="publisher"' not in chapter
-    assert "font-family: inherit" in css
+    normalized_css = css.replace("\r\n", "\n")
+    assert "font-family: inherit" in normalized_css
+    assert "p {\n  margin: 0 0 0.75em;" in normalized_css
+    assert "p.eo-body {\n  text-indent: 0;" in normalized_css
+    assert "p.eo-first {\n  text-indent: 1em;" in normalized_css
 
     second_result = optimize_epub(result.output_path, tmp_path / "out-second")
     with zipfile.ZipFile(second_result.output_path) as archive:
