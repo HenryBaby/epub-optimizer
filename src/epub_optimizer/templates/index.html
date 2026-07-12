@@ -4,8 +4,15 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>EPUB Optimizer</title>
-    <link rel="icon" type="image/png" href="{{ url_for('static', path='/favicon.png') }}">
-    <link rel="stylesheet" href="{{ url_for('static', path='/styles.css') }}">
+    <link
+      rel="icon"
+      type="image/png"
+      href="{{ url_for('static', path='/favicon.png') }}?v={{ app_version }}"
+    >
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', path='/styles.css') }}?v={{ app_version }}"
+    >
   </head>
   <body>
     <main class="shell">
@@ -99,6 +106,6 @@
         <div id="results-list" class="results-list"></div>
       </section>
     </main>
-    <script src="{{ url_for('static', path='/app.js') }}"></script>
+    <script src="{{ url_for('static', path='/app.js') }}?v={{ app_version }}"></script>
   </body>
 </html>
