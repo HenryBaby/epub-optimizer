@@ -60,7 +60,7 @@ h3.eo-chapter {
   font-size: 1.2em;
   line-height: 1.3;
   font-weight: bold;
-  text-align: left;
+  text-align: center;
 }
 
 h1.eo-part,
@@ -94,7 +94,7 @@ h6.eo-section {
   margin: 2em 0 1em;
   font-size: 1.05em;
   font-weight: normal;
-  text-align: left;
+  text-align: center;
 }
 
 p.eo-centered,
@@ -119,6 +119,45 @@ div.eo-right {
 .eo-toc {
   margin: 1em 0;
   text-align: center;
+}
+
+h1.eo-toc-heading,
+h2.eo-toc-heading,
+h3.eo-toc-heading {
+  margin: 2em 0 3em;
+  font-size: 1.2em;
+  line-height: 1.3;
+  font-weight: bold;
+  text-align: center;
+}
+
+p.eo-toc-entry,
+div.eo-toc-entry {
+  margin: 1em 0 0;
+  font-size: 0.9em;
+  line-height: 1.4;
+  text-align: center;
+  text-indent: 0;
+}
+
+p.eo-toc-part,
+div.eo-toc-part {
+  margin: 1em 0 0;
+  font-size: 1em;
+  line-height: 1.5;
+  text-align: center;
+  text-indent: 0;
+  font-weight: bold;
+  text-transform: uppercase;
+}
+
+p.eo-toc-chapter,
+div.eo-toc-chapter {
+  margin: 0;
+  font-size: 0.9em;
+  line-height: 1.4;
+  text-align: center;
+  text-indent: 0;
 }
 
 p.eo-scene-break {

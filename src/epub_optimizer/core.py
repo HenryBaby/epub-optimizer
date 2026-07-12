@@ -453,6 +453,10 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
         source_classes = set(element.attrib.get("class", "").lower().split())
 
         if local in {"h1", "h2", "h3", "h4", "h5", "h6"}:
+            if document_role == "toc":
+                _replace_classes(element, "eo-toc-heading")
+                after_boundary = True
+                continue
             _replace_classes(element, _heading_role(local, source_classes, is_front_matter))
             after_boundary = True
             continue
@@ -478,6 +482,13 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
             continue
 
         if local == "p":
+            if document_role == "toc":
+                role = _toc_entry_role(element, source_classes, after_boundary)
+                if role == "eo-toc-heading":
+                    _rename_element(element, "h1")
+                _replace_classes(element, role)
+                after_boundary = role in {"eo-image", "eo-toc-heading", "eo-toc-part"}
+                continue
             role = _paragraph_role(element, source_classes, after_boundary, is_front_matter)
             _replace_classes(element, role)
             after_boundary = role in {
@@ -494,9 +505,17 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
 
         if local == "div" and _is_direct_body_child(element):
             container_role = _container_role(source_classes)
-            role = container_role or _anonymous_div_role(element, after_boundary, document_role)
+            if document_role == "toc":
+                role = container_role or _toc_entry_role(element, source_classes, after_boundary)
+            else:
+                role = container_role or _anonymous_div_role(element, after_boundary, document_role)
             if role:
-                if role in {"eo-chapter", "eo-part", "eo-front", "eo-section"}:
+                if role in {
+                    "eo-chapter",
+                    "eo-front",
+                    "eo-section",
+                    "eo-toc-heading",
+                }:
                     _rename_element(element, "h1")
                     _replace_classes(element, role)
                     after_boundary = True
@@ -516,6 +535,9 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
                         "eo-image",
                         "eo-poetry",
                         "eo-scene-break",
+                        "eo-toc-entry",
+                        "eo-toc-chapter",
+                        "eo-toc-part",
                     }
                 continue
 
@@ -534,6 +556,34 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
                     _rename_element(element, "p")
                     _replace_classes(element, role)
                     after_boundary = role in {"eo-front-list-item", "eo-scene-break", "eo-image"}
+                continue
+
+        if local == "div" and document_role == "toc":
+            container_role = _container_role(source_classes)
+            if container_role == "eo-toc":
+                _replace_classes(element, container_role)
+                after_boundary = True
+                continue
+
+            role = container_role or _toc_entry_role(element, source_classes, after_boundary)
+            if role:
+                if role == "eo-toc-heading":
+                    _rename_element(element, "h1")
+                    _replace_classes(element, role)
+                    after_boundary = True
+                    continue
+                if _has_block_children(element):
+                    _replace_classes(element, role)
+                    after_boundary = True
+                    continue
+                _rename_element(element, "p")
+                _replace_classes(element, role)
+                after_boundary = role in {
+                    "eo-scene-break",
+                    "eo-toc-chapter",
+                    "eo-toc-entry",
+                    "eo-toc-part",
+                }
                 continue
 
         if local in {"div", "figure", "section"}:
@@ -615,7 +665,11 @@ def _container_role(classes: set[str]) -> str | None:
         return "eo-footnote"
     if classes & {"dedication"}:
         return "eo-dedication"
-    if classes & {"toc", "toc_fm", "toc_bm", "toc_chap", "toc_part", "toc_sub"}:
+    if classes & {"toc_part", "eo-toc-part"}:
+        return "eo-toc-part"
+    if classes & {"toc_chap", "toc_sub", "eo-toc-chapter"}:
+        return "eo-toc-chapter"
+    if classes & {"toc", "toc_fm", "toc_bm", "eo-toc"}:
         return "eo-toc"
     if classes & {"copyright", "otherbooks", "titlepage"}:
         return "eo-centered"
@@ -735,6 +789,68 @@ def _is_front_list_item(element: etree._Element) -> bool:
     return text_count >= 3 and short_leaf_count / text_count >= 0.75
 
 
+def _toc_entry_role(
+    element: etree._Element,
+    classes: set[str],
+    after_boundary: bool,
+) -> str:
+    text = _normalized_text(element)
+    if _contains_direct_image(element):
+        return "eo-image"
+    if not text:
+        return "eo-scene-break"
+    if _is_toc_separator(text):
+        return "eo-toc-entry"
+    if after_boundary and _is_short_heading_text(text) and not _contains_link(element):
+        return "eo-toc-heading"
+    if classes & {"toc_part"} or _looks_like_toc_part(element, text):
+        return "eo-toc-part"
+    if classes & {"toc_chap", "toc_sub"} or _contains_chapterish_link(element):
+        return "eo-toc-chapter"
+    return "eo-toc-entry"
+
+
+def _contains_link(element: etree._Element) -> bool:
+    return bool(element.xpath(".//*[local-name()='a']"))
+
+
+def _is_toc_separator(text: str) -> bool:
+    punctuation = {".", "*", "-", "_", "•", "·", "…"}
+    return bool(text) and all(char.isspace() or char in punctuation for char in text)
+
+
+def _looks_like_toc_part(element: etree._Element, text: str) -> bool:
+    if not _contains_link(element):
+        return False
+    words = text.split()
+    letters = [char for char in text if char.isalpha()]
+    return len(words) <= 4 and (not letters or all(char.upper() == char for char in letters))
+
+
+def _contains_chapterish_link(element: etree._Element) -> bool:
+    for link in element.xpath(".//*[local-name()='a']"):
+        href_name = posixpath.basename(link.attrib.get("href", "").split("#", 1)[0]).lower()
+        if (
+            "chap" in href_name
+            or "chapter" in href_name
+            or _has_numbered_content_token(href_name, "c")
+        ):
+            return True
+    return False
+
+
+def _has_numbered_content_token(value: str, prefix: str) -> bool:
+    for separator in {"_", "-", "."}:
+        marker = f"{separator}{prefix}"
+        start = value.find(marker)
+        while start != -1:
+            suffix = value[start + len(marker) :]
+            if suffix and suffix[0].isdigit():
+                return True
+            start = value.find(marker, start + 1)
+    return value.startswith(prefix) and len(value) > 1 and value[1].isdigit()
+
+
 def _is_first_meaningful_body_child(element: etree._Element) -> bool:
     parent = element.getparent()
     if parent is None:
@@ -803,6 +919,8 @@ def _document_role(item: etree._Element) -> str:
         ]
     ).lower()
     if any(hint in values for hint in FRONT_MATTER_HINTS):
+        if "toc" in values or "contents" in values:
+            return "toc"
         return "front"
     if "part" in values:
         return "part"

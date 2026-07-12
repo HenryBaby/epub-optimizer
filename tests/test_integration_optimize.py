@@ -84,6 +84,22 @@ def test_optimize_front_matter_nested_divs_and_empty_breaks(tmp_path: Path) -> N
     assert '<p class="eo-scene-break"/>' in chapter or '<p class="eo-scene-break"></p>' in chapter
 
 
+def test_optimize_toc_entries(tmp_path: Path) -> None:
+    source = tmp_path / "toc.epub"
+    _write_toc_epub(source)
+
+    result = optimize_epub(source, tmp_path / "out-toc")
+
+    with zipfile.ZipFile(result.output_path) as archive:
+        toc = archive.read("OEBPS/contents.xhtml").decode("utf-8")
+
+    assert '<h1 class="eo-toc-heading">CONTENTS</h1>' in toc
+    assert '<div class="eo-toc" id="toc">' in toc
+    assert '<p class="eo-toc-entry"><a href="title.xhtml">Title Page</a></p>' in toc
+    assert '<p class="eo-toc-part"><a href="part001.xhtml">PART ONE</a></p>' in toc
+    assert '<p class="eo-toc-chapter"><a href="chapter001.xhtml">Chapter One</a></p>' in toc
+
+
 def _write_minimal_epub(path: Path) -> None:
     with zipfile.ZipFile(path, "w") as archive:
         archive.writestr(
@@ -264,6 +280,72 @@ def _write_front_matter_div_epub(path: Path) -> None:
     <div/>
     <div>First body paragraph.</div>
   </body>
+</html>
+""",
+        )
+
+
+def _write_toc_epub(path: Path) -> None:
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr(
+            "mimetype",
+            "application/epub+zip",
+            compress_type=zipfile.ZIP_STORED,
+        )
+        archive.writestr(
+            "META-INF/container.xml",
+            """<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>
+""",
+        )
+        archive.writestr(
+            "content.opf",
+            """<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="id" version="3.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="id">urn:test-toc</dc:identifier>
+    <dc:title>TOC Test</dc:title>
+    <dc:language>en</dc:language>
+  </metadata>
+  <manifest>
+    <item id="contents" href="OEBPS/contents.xhtml" media-type="application/xhtml+xml"/>
+    <item id="chapter001" href="OEBPS/chapter001.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="contents"/>
+    <itemref idref="chapter001"/>
+  </spine>
+</package>
+""",
+        )
+        archive.writestr(
+            "OEBPS/contents.xhtml",
+            """<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head><title>TOC Test</title></head>
+  <body>
+    <div class="toc" id="toc">
+      <h1 class="toc">CONTENTS</h1>
+      <div class="toc_fm">
+        <p class="center0"><a href="title.xhtml">Title Page</a></p>
+      </div>
+      <div class="toc_part"><a href="part001.xhtml">PART ONE</a></div>
+      <div class="toc_chap"><a href="chapter001.xhtml">Chapter One</a></div>
+    </div>
+  </body>
+</html>
+""",
+        )
+        archive.writestr(
+            "OEBPS/chapter001.xhtml",
+            """<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head><title>TOC Test</title></head>
+  <body><p>Body.</p></body>
 </html>
 """,
         )
