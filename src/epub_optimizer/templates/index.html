@@ -31,139 +31,152 @@
         </label>
       </header>
 
-      <section class="workspace">
-        <div class="panel upload-panel">
+      <nav class="app-tabs" aria-label="Application sections">
+        <button class="tab-button tab-button-active" type="button" data-tab="optimizer" aria-selected="true">
+          Optimizer
+        </button>
+        <button class="tab-button" type="button" data-tab="automation" aria-selected="false">
+          Automation
+        </button>
+      </nav>
+
+      <div class="tab-panel tab-panel-active" data-tab-panel="optimizer">
+        <section class="workspace">
+          <div class="panel upload-panel">
+            <div class="panel-heading">
+              <div>
+                <h2>Queue EPUBs</h2>
+                <p>Upload one/multiple files and process them.</p>
+              </div>
+              <span class="limit-badge">{{ max_upload_mb }} MB max</span>
+            </div>
+
+            <form id="optimizer-form" action="/optimize" method="post" enctype="multipart/form-data">
+              <div class="dropzone">
+                <button
+                  id="source-picker"
+                  class="dropzone-main"
+                  type="button"
+                >
+                  <span class="dropzone-icon" aria-hidden="true">+</span>
+                  <span>
+                    <strong>Select EPUB files or drop a folder</strong>
+                    <small id="file-summary">No files selected</small>
+                  </span>
+                </button>
+                <button id="choose-folder" class="folder-link" type="button">Choose folder</button>
+              </div>
+              <input
+                id="files"
+                class="file-input"
+                name="files"
+                type="file"
+                accept=".epub,application/epub+zip"
+                multiple
+              >
+              <label class="filename-option" for="append-suffix">
+                <input id="append-suffix" name="append_suffix" type="checkbox" checked>
+                <span>Append <code>-optimized</code> to output filenames</span>
+              </label>
+              <button id="optimize-button" type="submit">Optimize EPUB</button>
+            </form>
+          </div>
+
+          <div class="panel progress-panel" aria-live="polite">
+            <div class="panel-heading compact">
+              <div>
+                <div class="activity-title">
+                  <h2>Activity</h2>
+                  <span class="status-pill" id="status-pill">Idle</span>
+                </div>
+              </div>
+              <p id="status-detail">Select one or more EPUB files.</p>
+            </div>
+            <div class="status-card">
+              <h2 id="status-title">Ready</h2>
+              <div class="meter" aria-hidden="true"><span id="progress-meter"></span></div>
+            </div>
+
+            <div class="log-heading">
+              <h3>Processing tasks</h3>
+              <span id="log-count">0 of 9 active</span>
+            </div>
+            <div id="processing-log" class="task-list" role="status" aria-live="polite"></div>
+          </div>
+        </section>
+
+        <section id="results-panel" class="panel result" hidden>
           <div class="panel-heading">
             <div>
-              <h2>Queue EPUBs</h2>
-              <p>Upload one/multiple files and process them.</p>
+              <h2>Optimized EPUBs</h2>
+              <p>Finished files are available until the app container is reset.</p>
             </div>
-            <span class="limit-badge">{{ max_upload_mb }} MB max</span>
+            <a id="download-all" class="button secondary" href="#" hidden>Download all</a>
           </div>
+          <div id="results-list" class="results-list"></div>
+        </section>
+      </div>
 
-          <form id="optimizer-form" action="/optimize" method="post" enctype="multipart/form-data">
-            <div class="dropzone">
-              <button
-                id="source-picker"
-                class="dropzone-main"
-                type="button"
-              >
-                <span class="dropzone-icon" aria-hidden="true">+</span>
-                <span>
-                  <strong>Select EPUB files or drop a folder</strong>
-                  <small id="file-summary">No files selected</small>
-                </span>
-              </button>
-              <button id="choose-folder" class="folder-link" type="button">Choose folder</button>
-            </div>
-            <input
-              id="files"
-              class="file-input"
-              name="files"
-              type="file"
-              accept=".epub,application/epub+zip"
-              multiple
-            >
-            <label class="filename-option" for="append-suffix">
-              <input id="append-suffix" name="append_suffix" type="checkbox" checked>
-              <span>Append <code>-optimized</code> to output filenames</span>
-            </label>
-            <button id="optimize-button" type="submit">Optimize EPUB</button>
-          </form>
-        </div>
-
-        <div class="panel progress-panel" aria-live="polite">
-          <div class="panel-heading compact">
+      <div class="tab-panel" data-tab-panel="automation" hidden>
+        <section class="panel automation-panel">
+          <div class="panel-heading">
             <div>
-              <div class="activity-title">
-                <h2>Activity</h2>
-                <span class="status-pill" id="status-pill">Idle</span>
-              </div>
+              <h2>Automation</h2>
+              <p>Watch a local EPUB drop folder and send optimized files to the output folder.</p>
             </div>
-            <p id="status-detail">Select one or more EPUB files.</p>
+            <span class="status-pill" id="automation-pill">Idle</span>
           </div>
-          <div class="status-card">
-            <h2 id="status-title">Ready</h2>
-            <div class="meter" aria-hidden="true"><span id="progress-meter"></span></div>
+
+          <div class="automation-grid">
+            <form id="automation-form" class="automation-form">
+              <label class="filename-option" for="automation-enabled">
+                <input id="automation-enabled" name="enabled" type="checkbox">
+                <span>Enable watched-folder automation</span>
+              </label>
+              <label class="filename-option" for="automation-append-suffix">
+                <input id="automation-append-suffix" name="append_suffix" type="checkbox" checked>
+                <span>Append <code>-optimized</code> to automatic output filenames</span>
+              </label>
+              <label class="field-row" for="automation-poll-seconds">
+                <span>Poll interval</span>
+                <input id="automation-poll-seconds" name="poll_seconds" type="number" min="3" max="3600" step="1">
+              </label>
+              <label class="field-row" for="automation-stable-seconds">
+                <span>File stability wait</span>
+                <input id="automation-stable-seconds" name="stable_seconds" type="number" min="3" max="3600" step="1">
+              </label>
+              <button id="automation-save" type="submit">Save automation</button>
+            </form>
+
+            <div>
+              <dl class="stats automation-stats">
+                <div>
+                  <dt>Watch folder</dt>
+                  <dd id="automation-watch-dir">/watch</dd>
+                </div>
+                <div>
+                  <dt>Output folder</dt>
+                  <dd id="automation-output-dir">/output</dd>
+                </div>
+                <div>
+                  <dt>Failed folder</dt>
+                  <dd id="automation-failed-dir">/data/failed</dd>
+                </div>
+                <div>
+                  <dt>Current job</dt>
+                  <dd id="automation-current-job">None</dd>
+                </div>
+              </dl>
+            </div>
           </div>
 
           <div class="log-heading">
-            <h3>Processing tasks</h3>
-            <span id="log-count">0 of 9 active</span>
+            <h3>Automatic jobs</h3>
+            <span id="automation-summary">No jobs yet</span>
           </div>
-          <div id="processing-log" class="task-list" role="status" aria-live="polite"></div>
-        </div>
-      </section>
-
-      <section class="panel automation-panel">
-        <div class="panel-heading">
-          <div>
-            <h2>Automation</h2>
-            <p>Watch a local EPUB drop folder and send optimized files to the output folder.</p>
-          </div>
-          <span class="status-pill" id="automation-pill">Idle</span>
-        </div>
-
-        <div class="automation-grid">
-          <form id="automation-form" class="automation-form">
-            <label class="filename-option" for="automation-enabled">
-              <input id="automation-enabled" name="enabled" type="checkbox">
-              <span>Enable watched-folder automation</span>
-            </label>
-            <label class="filename-option" for="automation-append-suffix">
-              <input id="automation-append-suffix" name="append_suffix" type="checkbox" checked>
-              <span>Append <code>-optimized</code> to automatic output filenames</span>
-            </label>
-            <label class="field-row" for="automation-poll-seconds">
-              <span>Poll interval</span>
-              <input id="automation-poll-seconds" name="poll_seconds" type="number" min="3" max="3600" step="1">
-            </label>
-            <label class="field-row" for="automation-stable-seconds">
-              <span>File stability wait</span>
-              <input id="automation-stable-seconds" name="stable_seconds" type="number" min="3" max="3600" step="1">
-            </label>
-            <button id="automation-save" type="submit">Save automation</button>
-          </form>
-
-          <div>
-            <dl class="stats automation-stats">
-              <div>
-                <dt>Watch folder</dt>
-                <dd id="automation-watch-dir">/watch</dd>
-              </div>
-              <div>
-                <dt>Output folder</dt>
-                <dd id="automation-output-dir">/output</dd>
-              </div>
-              <div>
-                <dt>Failed folder</dt>
-                <dd id="automation-failed-dir">/data/failed</dd>
-              </div>
-              <div>
-                <dt>Current job</dt>
-                <dd id="automation-current-job">None</dd>
-              </div>
-            </dl>
-          </div>
-        </div>
-
-        <div class="log-heading">
-          <h3>Automatic jobs</h3>
-          <span id="automation-summary">No jobs yet</span>
-        </div>
-        <div id="automation-history" class="results-list automation-history"></div>
-      </section>
-
-      <section id="results-panel" class="panel result" hidden>
-        <div class="panel-heading">
-          <div>
-            <h2>Optimized EPUBs</h2>
-            <p>Finished files are available until the app container is reset.</p>
-          </div>
-          <a id="download-all" class="button secondary" href="#" hidden>Download all</a>
-        </div>
-        <div id="results-list" class="results-list"></div>
-      </section>
+          <div id="automation-history" class="results-list automation-history"></div>
+        </section>
+      </div>
     </main>
     <script src="/static/app.js?v={{ app_version }}"></script>
   </body>

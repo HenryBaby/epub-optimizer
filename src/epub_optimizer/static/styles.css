@@ -210,6 +210,45 @@ button:focus-visible,
   outline-offset: 2px;
 }
 
+.app-tabs {
+  display: inline-flex;
+  gap: 6px;
+  margin-bottom: 18px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 5px;
+  background: color-mix(in srgb, var(--surface) 72%, transparent);
+  box-shadow: 0 10px 28px rgba(52, 59, 88, 0.08);
+}
+
+.tab-button {
+  min-height: 34px;
+  border: 0;
+  border-radius: 6px;
+  padding: 7px 13px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.tab-button:hover {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.tab-button-active,
+.tab-button-active:hover {
+  background: linear-gradient(135deg, var(--accent), var(--magenta));
+  color: var(--accent-contrast);
+}
+
+.tab-panel[hidden] {
+  display: none;
+}
+
 .workspace {
   display: grid;
   grid-template-columns: minmax(0, 0.95fr) minmax(360px, 1.05fr);
@@ -474,7 +513,7 @@ form {
   font: inherit;
 }
 
-button:not(.dropzone-main):not(.folder-link),
+button:not(.dropzone-main):not(.folder-link):not(.tab-button),
 .button {
   display: inline-flex;
   align-items: center;
@@ -495,7 +534,7 @@ button:not(.dropzone-main):not(.folder-link),
     transform 160ms ease;
 }
 
-button:not(.dropzone-main):not(.folder-link):hover,
+button:not(.dropzone-main):not(.folder-link):not(.tab-button):hover,
 .button:hover {
   background: var(--accent-strong);
   transform: translateY(-1px);
@@ -930,6 +969,12 @@ dd {
 
   .topbar {
     gap: 16px;
+  }
+
+  .app-tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    width: 100%;
   }
 
   .panel-heading.compact p {

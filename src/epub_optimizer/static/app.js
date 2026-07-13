@@ -28,6 +28,8 @@ const automationFailedDir = document.querySelector("#automation-failed-dir");
 const automationCurrentJob = document.querySelector("#automation-current-job");
 const automationSummary = document.querySelector("#automation-summary");
 const automationHistory = document.querySelector("#automation-history");
+const tabButtons = document.querySelectorAll(".tab-button");
+const tabPanels = document.querySelectorAll(".tab-panel");
 
 let queueTotal = 0;
 let queueCompleted = 0;
@@ -47,6 +49,7 @@ const TASKS = [
 const taskRows = new Map();
 
 initializeTheme();
+initializeTabs();
 initializeTasks();
 updateFileSummary();
 loadAutomation();
@@ -55,6 +58,12 @@ setInterval(loadAutomation, 5000);
 themeToggle.addEventListener("change", () => {
   setTheme(themeToggle.checked ? "dark" : "light");
 });
+
+for (const tabButton of tabButtons) {
+  tabButton.addEventListener("click", () => {
+    activateTab(tabButton.dataset.tab || "optimizer");
+  });
+}
 
 fileInput.addEventListener("change", updateFileSummary);
 
@@ -578,6 +587,30 @@ function setTheme(theme) {
   document.documentElement.dataset.theme = theme;
   themeToggle.checked = theme === "dark";
   localStorage.setItem("epubOptimizerTheme", theme);
+}
+
+function initializeTabs() {
+  const storedTab = localStorage.getItem("epubOptimizerTab");
+  activateTab(storedTab || "optimizer");
+}
+
+function activateTab(tabName) {
+  const panelExists = Array.from(tabPanels).some((panel) => panel.dataset.tabPanel === tabName);
+  const nextTab = panelExists ? tabName : "optimizer";
+
+  for (const tabButton of tabButtons) {
+    const isActive = tabButton.dataset.tab === nextTab;
+    tabButton.classList.toggle("tab-button-active", isActive);
+    tabButton.setAttribute("aria-selected", String(isActive));
+  }
+
+  for (const panel of tabPanels) {
+    const isActive = panel.dataset.tabPanel === nextTab;
+    panel.classList.toggle("tab-panel-active", isActive);
+    panel.hidden = !isActive;
+  }
+
+  localStorage.setItem("epubOptimizerTab", nextTab);
 }
 
 async function loadAutomation() {
