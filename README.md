@@ -7,7 +7,7 @@ EPUB Optimizer accepts one or more `.epub` files, processes them locally, and
 returns separate `-optimized.epub` downloads. It is built for predictable,
 conservative cleanup rather than aggressive rewriting.
 
-![EPUB Optimizer UI showcase](assets/ui-showcase.png)
+![EPUB Optimizer UI showcase](assets/ui-showcase-1.1.0.png)
 
 ## What It Does
 
