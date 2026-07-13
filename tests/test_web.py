@@ -33,9 +33,9 @@ def test_homepage_renders() -> None:
 
     assert response.status_code == 200
     assert "EPUB Optimizer" in response.text
-    assert "v1.0.6" in response.text
-    assert 'href="/static/favicon.png?v=1.0.6"' in response.text
-    assert 'href="/static/styles.css?v=1.0.6"' in response.text
+    assert "v1.0.7" in response.text
+    assert 'href="/static/favicon.png?v=1.0.7"' in response.text
+    assert 'href="/static/styles.css?v=1.0.7"' in response.text
     assert 'id="optimizer-form"' in response.text
     assert 'name="files"' in response.text
     assert 'id="source-picker"' in response.text
@@ -47,7 +47,7 @@ def test_homepage_renders() -> None:
     assert 'id="progress-meter"' in response.text
     assert 'id="download-all"' in response.text
     assert 'id="automation-form"' in response.text
-    assert 'src="/static/app.js?v=1.0.6"' in response.text
+    assert 'src="/static/app.js?v=1.0.7"' in response.text
 
 
 def test_automation_status_and_configuration() -> None:
