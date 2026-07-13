@@ -75,6 +75,12 @@ async def configure_automation(request: Request) -> JSONResponse:
     return JSONResponse({"config": asdict(config), "status": _automation_manager().status()})
 
 
+@app.delete("/automation/history")
+async def clear_automation_history() -> JSONResponse:
+    await _automation_manager().clear_history()
+    return JSONResponse(_automation_manager().status())
+
+
 @app.post("/optimize")
 async def optimize(
     files: Annotated[list[UploadFile], File()],

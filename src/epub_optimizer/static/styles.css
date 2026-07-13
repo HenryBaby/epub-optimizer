@@ -808,6 +808,18 @@ button:disabled {
   margin-top: 12px;
 }
 
+.automation-history-actions {
+  display: inline-flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.automation-history-actions .details-toggle {
+  min-height: 28px;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
 .automation-job {
   border: 1px solid var(--border);
   border-radius: 8px;

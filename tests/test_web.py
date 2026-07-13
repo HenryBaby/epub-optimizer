@@ -5,7 +5,7 @@ from io import BytesIO
 import pytest
 from fastapi.testclient import TestClient
 
-from epub_optimizer.automation import AutomationManager
+from epub_optimizer.automation import AutomationJob, AutomationManager
 from epub_optimizer.web import app
 
 
@@ -33,9 +33,9 @@ def test_homepage_renders() -> None:
 
     assert response.status_code == 200
     assert "EPUB Optimizer" in response.text
-    assert "v1.0.7" in response.text
-    assert 'href="/static/favicon.png?v=1.0.7"' in response.text
-    assert 'href="/static/styles.css?v=1.0.7"' in response.text
+    assert "v1.1.0" in response.text
+    assert 'href="/static/favicon.png?v=1.1.0"' in response.text
+    assert 'href="/static/styles.css?v=1.1.0"' in response.text
     assert 'id="optimizer-form"' in response.text
     assert 'name="files"' in response.text
     assert 'id="source-picker"' in response.text
@@ -47,7 +47,8 @@ def test_homepage_renders() -> None:
     assert 'id="progress-meter"' in response.text
     assert 'id="download-all"' in response.text
     assert 'id="automation-form"' in response.text
-    assert 'src="/static/app.js?v=1.0.7"' in response.text
+    assert 'id="automation-clear-history"' in response.text
+    assert 'src="/static/app.js?v=1.1.0"' in response.text
 
 
 def test_automation_status_and_configuration() -> None:
@@ -79,6 +80,27 @@ def test_automation_status_and_configuration() -> None:
         "poll_seconds": 4,
         "stable_seconds": 5,
     }
+
+
+def test_automation_history_can_be_cleared() -> None:
+    client = TestClient(app)
+    manager = app.state.automation_manager
+    manager.history = [
+        AutomationJob(
+            filename="Book.epub",
+            status="success",
+            message="Done.",
+            output_filename="Book-optimized.epub",
+            elapsed_seconds=0.1,
+            updated_at=1.0,
+        )
+    ]
+
+    response = client.delete("/automation/history")
+
+    assert response.status_code == 200
+    assert response.json()["history"] == []
+    assert manager.history == []
 
 
 def test_streaming_optimize_handles_url_significant_filename_chars() -> None:

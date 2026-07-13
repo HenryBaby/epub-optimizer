@@ -102,6 +102,11 @@ class AutomationManager:
             self._write_json(self.config_path, asdict(self.config))
             return self.config
 
+    async def clear_history(self) -> None:
+        async with self._lock:
+            self.history = []
+            self._write_json(self.history_path, [])
+
     def status(self) -> dict[str, Any]:
         return {
             "config": asdict(self.config),

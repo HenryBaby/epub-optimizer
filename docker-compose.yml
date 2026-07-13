@@ -11,6 +11,8 @@ services:
       - epubo_data:/data
       - /path/to/watch:/watch
       - /path/to/bookdrop:/output
+      # Optional: expose failed automation inputs and error reports on the host.
+      # - /path/to/failed:/data/failed
 
 volumes:
   epubo_data:

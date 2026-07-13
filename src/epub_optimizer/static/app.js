@@ -28,6 +28,7 @@ const automationFailedDir = document.querySelector("#automation-failed-dir");
 const automationCurrentJob = document.querySelector("#automation-current-job");
 const automationSummary = document.querySelector("#automation-summary");
 const automationHistory = document.querySelector("#automation-history");
+const automationClearHistory = document.querySelector("#automation-clear-history");
 const tabButtons = document.querySelectorAll(".tab-button");
 const tabPanels = document.querySelectorAll(".tab-panel");
 
@@ -180,6 +181,16 @@ automationForm.addEventListener("submit", async (event) => {
   }
   const data = await response.json();
   renderAutomation(data.status);
+});
+
+automationClearHistory.addEventListener("click", async () => {
+  automationClearHistory.disabled = true;
+  const response = await fetch("/automation/history", { method: "DELETE" });
+  if (!response.ok) {
+    automationPill.textContent = "Error";
+    return;
+  }
+  renderAutomation(await response.json());
 });
 
 async function readEventStream(stream) {
@@ -646,6 +657,7 @@ function renderAutomation(status) {
   const history = status.history || [];
   automationSummary.textContent =
     history.length === 0 ? "No jobs yet" : `${history.length} recent job${history.length === 1 ? "" : "s"}`;
+  automationClearHistory.disabled = history.length === 0;
   automationHistory.replaceChildren();
   for (const job of history) {
     automationHistory.append(createAutomationJob(job));
