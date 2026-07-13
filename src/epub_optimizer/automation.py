@@ -15,7 +15,7 @@ from epub_optimizer.errors import FailureDiagnostic, failure_diagnostic
 
 WATCH_DIR = Path("/watch")
 AUTOMATION_OUTPUT_DIR = Path("/output")
-FAILED_DIR = Path("/data/failed")
+FAILED_DIR = Path("/failed")
 UNPROCESSED_DIR = Path("/unprocessed")
 AUTOMATION_CONFIG_PATH = Path("/data/automation-config.json")
 AUTOMATION_HISTORY_PATH = Path("/data/automation-history.json")

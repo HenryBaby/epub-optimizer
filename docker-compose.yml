@@ -14,7 +14,7 @@ services:
       # Optional: expose successfully processed source EPUBs on the host.
       # - /path/to/unprocessed:/unprocessed
       # Optional: expose failed automation inputs and error reports on the host.
-      # - /path/to/failed:/data/failed
+      # - /path/to/failed:/failed
 
 volumes:
   epubo_data:

@@ -653,7 +653,7 @@ function renderAutomation(status) {
   automationStableSeconds.value = config.stable_seconds || 15;
   automationWatchDir.textContent = paths.watch_dir || "/watch";
   automationOutputDir.textContent = paths.output_dir || "/output";
-  automationFailedDir.textContent = paths.failed_dir || "/data/failed";
+  automationFailedDir.textContent = paths.failed_dir || "/failed";
   automationUnprocessedDir.textContent = paths.unprocessed_dir || "/unprocessed";
   automationPill.textContent = config.enabled ? "Watching" : "Disabled";
 

@@ -43,6 +43,7 @@ The default Compose file mounts:
 - `/watch` for optional watched-folder automation input
 - `/output` for optimized files produced by automation
 - `/unprocessed` for successfully processed source EPUBs, cleaned after 30 days
+- `/failed` for failed automation inputs and error reports
 
 Replace the `/output` mount with your library manager bookdrop folder when using
 automation. Manual downloads and ZIP archives are removed from `/data` after
@@ -60,9 +61,9 @@ GitHub Actions validates Docker builds on pull requests and pushes to `main`.
 Pushing a matching version tag publishes the image:
 
 ```text
-pyproject.toml version = 1.1.3
-git tag v1.1.3
-git push origin v1.1.3
+pyproject.toml version = 1.1.4
+git tag v1.1.4
+git push origin v1.1.4
 ```
 
 Published tags:
