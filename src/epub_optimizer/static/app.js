@@ -25,6 +25,7 @@ const automationPill = document.querySelector("#automation-pill");
 const automationWatchDir = document.querySelector("#automation-watch-dir");
 const automationOutputDir = document.querySelector("#automation-output-dir");
 const automationFailedDir = document.querySelector("#automation-failed-dir");
+const automationUnprocessedDir = document.querySelector("#automation-unprocessed-dir");
 const automationMode = document.querySelector("#automation-mode");
 const automationCadence = document.querySelector("#automation-cadence");
 const automationRecentSuccess = document.querySelector("#automation-recent-success");
@@ -653,6 +654,7 @@ function renderAutomation(status) {
   automationWatchDir.textContent = paths.watch_dir || "/watch";
   automationOutputDir.textContent = paths.output_dir || "/output";
   automationFailedDir.textContent = paths.failed_dir || "/data/failed";
+  automationUnprocessedDir.textContent = paths.unprocessed_dir || "/unprocessed";
   automationPill.textContent = config.enabled ? "Watching" : "Disabled";
 
   const history = status.history || [];

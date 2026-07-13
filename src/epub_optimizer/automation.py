@@ -16,10 +16,12 @@ from epub_optimizer.errors import FailureDiagnostic, failure_diagnostic
 WATCH_DIR = Path("/watch")
 AUTOMATION_OUTPUT_DIR = Path("/output")
 FAILED_DIR = Path("/data/failed")
+UNPROCESSED_DIR = Path("/unprocessed")
 AUTOMATION_CONFIG_PATH = Path("/data/automation-config.json")
 AUTOMATION_HISTORY_PATH = Path("/data/automation-history.json")
 DEFAULT_POLL_SECONDS = 10
 DEFAULT_STABLE_SECONDS = 15
+UNPROCESSED_RETENTION_SECONDS = 30 * 24 * 60 * 60
 MAX_HISTORY_ITEMS = 25
 
 LOGGER = logging.getLogger(__name__)
@@ -51,14 +53,18 @@ class AutomationManager:
         watch_dir: Path = WATCH_DIR,
         output_dir: Path = AUTOMATION_OUTPUT_DIR,
         failed_dir: Path = FAILED_DIR,
+        unprocessed_dir: Path = UNPROCESSED_DIR,
         config_path: Path = AUTOMATION_CONFIG_PATH,
         history_path: Path = AUTOMATION_HISTORY_PATH,
+        unprocessed_retention_seconds: int = UNPROCESSED_RETENTION_SECONDS,
     ) -> None:
         self.watch_dir = watch_dir
         self.output_dir = output_dir
         self.failed_dir = failed_dir
+        self.unprocessed_dir = unprocessed_dir
         self.config_path = config_path
         self.history_path = history_path
+        self.unprocessed_retention_seconds = unprocessed_retention_seconds
         self.config = self._load_config()
         self.history = self._load_history()
         self.current_job: AutomationJob | None = None
@@ -116,6 +122,7 @@ class AutomationManager:
                 "watch_dir": self.watch_dir.as_posix(),
                 "output_dir": self.output_dir.as_posix(),
                 "failed_dir": self.failed_dir.as_posix(),
+                "unprocessed_dir": self.unprocessed_dir.as_posix(),
             },
             "current_job": asdict(self.current_job) if self.current_job else None,
             "history": [asdict(job) for job in self.history],
@@ -126,6 +133,7 @@ class AutomationManager:
     async def _run(self) -> None:
         while not self._stop_event.is_set():
             try:
+                await asyncio.to_thread(self._cleanup_unprocessed)
                 if self.config.enabled:
                     await asyncio.to_thread(self._scan_once)
                 await asyncio.wait_for(
@@ -192,12 +200,13 @@ class AutomationManager:
                 output_filename=target_name,
                 progress=report,
             )
-            path.unlink()
+            archived_source = _unique_path(self.unprocessed_dir, path.name)
+            shutil.move(str(path), archived_source)
             self._record(
                 AutomationJob(
                     filename=path.name,
                     status="success",
-                    message="Optimized EPUB moved to output folder.",
+                    message="Optimized EPUB moved to output folder; source EPUB archived.",
                     output_filename=result.output_filename,
                     elapsed_seconds=round(time.perf_counter() - started, 2),
                     updated_at=time.time(),
@@ -241,8 +250,18 @@ class AutomationManager:
         self.watch_dir.mkdir(parents=True, exist_ok=True)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.failed_dir.mkdir(parents=True, exist_ok=True)
+        self.unprocessed_dir.mkdir(parents=True, exist_ok=True)
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
         self.history_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def _cleanup_unprocessed(self) -> None:
+        cutoff = time.time() - self.unprocessed_retention_seconds
+        for path in self.unprocessed_dir.glob("*.epub"):
+            try:
+                if path.is_file() and path.stat().st_mtime < cutoff:
+                    path.unlink()
+            except OSError:
+                LOGGER.exception("Failed to clean archived source EPUB %s", path)
 
     def _load_config(self) -> AutomationConfig:
         try:

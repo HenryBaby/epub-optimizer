@@ -11,6 +11,8 @@ services:
       - epubo_data:/data
       - /path/to/watch:/watch
       - /path/to/bookdrop:/output
+      # Optional: expose successfully processed source EPUBs on the host.
+      # - /path/to/unprocessed:/unprocessed
       # Optional: expose failed automation inputs and error reports on the host.
       # - /path/to/failed:/data/failed
 
