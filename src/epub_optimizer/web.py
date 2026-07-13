@@ -23,7 +23,7 @@ from starlette.background import BackgroundTask
 from epub_optimizer import __version__
 from epub_optimizer.automation import AutomationManager
 from epub_optimizer.core import optimize_epub, optimized_filename
-from epub_optimizer.errors import EpubOptimizerError
+from epub_optimizer.errors import EpubOptimizerError, failure_diagnostic
 
 BASE_DIR = Path(__file__).resolve().parent
 OUTPUT_BASE_DIR = Path("/data")
@@ -160,6 +160,11 @@ async def _optimization_events(
                     total=len(files),
                     filename=original_name or "Unknown file",
                     message="Please upload a file with the .epub extension.",
+                    **_diagnostic_event_fields(
+                        ValueError("File does not use the .epub extension."),
+                        stage="Preparing EPUB file",
+                        message="Please upload a file with the .epub extension.",
+                    ),
                 )
                 continue
 
@@ -173,6 +178,11 @@ async def _optimization_events(
                     total=len(files),
                     filename=original_name,
                     message=str(exc),
+                    **_diagnostic_event_fields(
+                        exc,
+                        stage="Saving uploaded EPUB",
+                        message=str(exc),
+                    ),
                 )
                 continue
             uploads.append((original_name, upload_path))
@@ -192,6 +202,7 @@ async def _optimization_events(
             yield _json_event("file_start", index=index, total=len(uploads), filename=original_name)
             queue: asyncio.Queue[dict[str, object]] = asyncio.Queue()
             loop = asyncio.get_running_loop()
+            stage = {"label": "Preparing EPUB file"}
 
             def report(
                 message: str,
@@ -201,7 +212,9 @@ async def _optimization_events(
                 file_index: int = index,
                 file_total: int = len(uploads),
                 file_name: str = original_name,
+                stage_ref: dict[str, str] = stage,
             ) -> None:
+                stage_ref["label"] = _stage_label_for_message(message)
                 event_loop.call_soon_threadsafe(
                     progress_queue.put_nowait,
                     {
@@ -265,6 +278,11 @@ async def _optimization_events(
                     total=len(uploads),
                     filename=original_name,
                     message=str(exc),
+                    **_diagnostic_event_fields(
+                        exc,
+                        stage=stage["label"],
+                        message=str(exc),
+                    ),
                 )
             except Exception as exc:
                 LOGGER.exception("Unexpected optimization failure for %s", original_name)
@@ -274,7 +292,12 @@ async def _optimization_events(
                     index=index,
                     total=len(uploads),
                     filename=original_name,
-                    message=f"Optimization failed unexpectedly: {type(exc).__name__}: {exc}",
+                    message="Optimization failed unexpectedly.",
+                    **_diagnostic_event_fields(
+                        exc,
+                        stage=stage["label"],
+                        message="Optimization failed unexpectedly.",
+                    ),
                 )
 
         if completed_downloads:
@@ -350,6 +373,40 @@ def _json_event(event_type: str, **payload: object) -> str:
 
 def _json_line(payload: dict[str, object]) -> str:
     return json.dumps(payload, ensure_ascii=False) + "\n"
+
+
+def _diagnostic_event_fields(
+    exc: BaseException,
+    *,
+    stage: str,
+    message: str,
+) -> dict[str, object]:
+    diagnostic = failure_diagnostic(exc, stage=stage, message=message)
+    return {
+        "stage": diagnostic.stage,
+        "exception_type": diagnostic.exception_type,
+        "detail": diagnostic.detail,
+        "diagnostic": diagnostic.to_dict(),
+    }
+
+
+def _stage_label_for_message(message: str) -> str:
+    normalized = message.lower()
+    if "validated epub archive" in normalized:
+        return "Validating EPUB archive"
+    if "extracted epub" in normalized:
+        return "Extracting EPUB workspace"
+    if "resolved opf package" in normalized:
+        return "Resolving package document"
+    if "removed" in normalized and "manifest" in normalized:
+        return "Cleaning old manifest entries"
+    if "deleted" in normalized and "style/font file" in normalized:
+        return "Deleting old style and font files"
+    if "processed" in normalized and "content document" in normalized:
+        return "Normalizing content documents"
+    if "repackaged optimized epub" in normalized:
+        return "Repackaging optimized EPUB"
+    return message
 
 
 def _render_error(request: Request, message: str) -> HTMLResponse:

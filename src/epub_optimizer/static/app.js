@@ -25,7 +25,11 @@ const automationPill = document.querySelector("#automation-pill");
 const automationWatchDir = document.querySelector("#automation-watch-dir");
 const automationOutputDir = document.querySelector("#automation-output-dir");
 const automationFailedDir = document.querySelector("#automation-failed-dir");
-const automationCurrentJob = document.querySelector("#automation-current-job");
+const automationMode = document.querySelector("#automation-mode");
+const automationCadence = document.querySelector("#automation-cadence");
+const automationRecentSuccess = document.querySelector("#automation-recent-success");
+const automationRecentFailed = document.querySelector("#automation-recent-failed");
+const automationLastFailure = document.querySelector("#automation-last-failure");
 const automationSummary = document.querySelector("#automation-summary");
 const automationHistory = document.querySelector("#automation-history");
 const automationClearHistory = document.querySelector("#automation-clear-history");
@@ -322,7 +326,9 @@ function updateTask(key, index, total) {
 
 function showTaskError(message, event = null) {
   let row = taskRows.get("error");
-  const errorMessage = event && event.filename ? `${event.filename}: ${message}` : message;
+  const diagnostic = event && event.diagnostic ? event.diagnostic : null;
+  const stage = diagnostic && diagnostic.stage ? `${diagnostic.stage}: ` : "";
+  const errorMessage = event && event.filename ? `${event.filename}: ${stage}${message}` : `${stage}${message}`;
   if (!row) {
     const task = { key: "error", label: errorMessage, icon: "error" };
     row = createTaskRow(task);
@@ -330,6 +336,7 @@ function showTaskError(message, event = null) {
     taskList.append(row.item);
   }
   row.item.querySelector(".task-message").textContent = errorMessage;
+  row.item.title = diagnostic && diagnostic.detail ? diagnostic.detail : "";
   row.item.className = "task-row task-error";
   row.state.textContent = "Error";
   row.progress.textContent =
@@ -648,13 +655,14 @@ function renderAutomation(status) {
   automationFailedDir.textContent = paths.failed_dir || "/data/failed";
   automationPill.textContent = config.enabled ? "Watching" : "Disabled";
 
-  if (status.current_job) {
-    automationCurrentJob.textContent = status.current_job.filename;
-  } else {
-    automationCurrentJob.textContent = "None";
-  }
-
   const history = status.history || [];
+  const failedJobs = history.filter((job) => job.status === "failed");
+  automationMode.textContent = config.enabled ? "Watching" : "Disabled";
+  automationCadence.textContent = `${config.poll_seconds || 10}s poll / ${config.stable_seconds || 15}s stable`;
+  automationRecentSuccess.textContent = String(history.filter((job) => job.status === "success").length);
+  automationRecentFailed.textContent = String(failedJobs.length);
+  automationLastFailure.textContent =
+    failedJobs.length === 0 ? "None" : failureSummary(failedJobs[0]);
   automationSummary.textContent =
     history.length === 0 ? "No jobs yet" : `${history.length} recent job${history.length === 1 ? "" : "s"}`;
   automationClearHistory.disabled = history.length === 0;
@@ -677,8 +685,51 @@ function createAutomationJob(job) {
   const detail = document.createElement("p");
   const elapsed =
     typeof job.elapsed_seconds === "number" ? ` ${job.elapsed_seconds.toFixed(2)}s.` : "";
-  detail.textContent = `${job.message || "No details."}${elapsed}`;
+  detail.textContent =
+    job.status === "failed" ? `${failureSummary(job)}${elapsed}` : `${job.message || "No details."}${elapsed}`;
 
   item.append(title, detail);
+  if (job.diagnostic) {
+    item.append(createFailureDetails(job.diagnostic));
+  }
   return item;
+}
+
+function failureSummary(job) {
+  const diagnostic = job.diagnostic || {};
+  const stage = diagnostic.stage || "Unknown stage";
+  const message = diagnostic.message || job.message || "Optimization failed.";
+  return `${stage}: ${message}`;
+}
+
+function createFailureDetails(diagnostic) {
+  const details = document.createElement("details");
+  details.className = "failure-details";
+
+  const summary = document.createElement("summary");
+  summary.textContent = "Failure details";
+  details.append(summary);
+
+  const list = document.createElement("dl");
+  list.className = "failure-detail-list";
+  addFailureDetail(list, "Exception", diagnostic.exception_type);
+  addFailureDetail(list, "Detail", diagnostic.detail);
+  addFailureDetail(list, "Internal path", diagnostic.internal_path);
+  addFailureDetail(list, "Failed file", diagnostic.failed_path);
+  addFailureDetail(list, "Report", diagnostic.report_path);
+  details.append(list);
+  return details;
+}
+
+function addFailureDetail(list, labelText, valueText) {
+  if (!valueText) {
+    return;
+  }
+  const wrapper = document.createElement("div");
+  const label = document.createElement("dt");
+  const value = document.createElement("dd");
+  label.textContent = labelText;
+  value.textContent = valueText;
+  wrapper.append(label, value);
+  list.append(wrapper);
 }

@@ -148,23 +148,41 @@
               <button id="automation-save" type="submit">Save automation</button>
             </form>
 
-            <div>
-              <dl class="stats automation-stats">
+            <div class="automation-overview">
+              <div class="automation-overview-grid">
                 <div>
-                  <dt>Watch folder</dt>
+                  <span>Mode</span>
+                  <strong id="automation-mode">Disabled</strong>
+                </div>
+                <div>
+                  <span>Cadence</span>
+                  <strong id="automation-cadence">Every 10s</strong>
+                </div>
+                <div>
+                  <span>Recent OK</span>
+                  <strong id="automation-recent-success">0</strong>
+                </div>
+                <div>
+                  <span>Recent failed</span>
+                  <strong id="automation-recent-failed">0</strong>
+                </div>
+              </div>
+              <div class="automation-last-failure">
+                <span>Last failure</span>
+                <strong id="automation-last-failure">None</strong>
+              </div>
+              <dl class="automation-paths">
+                <div>
+                  <dt>Watch</dt>
                   <dd id="automation-watch-dir">/watch</dd>
                 </div>
                 <div>
-                  <dt>Output folder</dt>
+                  <dt>Output</dt>
                   <dd id="automation-output-dir">/output</dd>
                 </div>
                 <div>
-                  <dt>Failed folder</dt>
+                  <dt>Failed</dt>
                   <dd id="automation-failed-dir">/data/failed</dd>
-                </div>
-                <div>
-                  <dt>Current job</dt>
-                  <dd id="automation-current-job">None</dd>
                 </div>
               </dl>
             </div>

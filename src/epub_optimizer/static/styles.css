@@ -337,6 +337,98 @@ form {
   align-content: start;
 }
 
+.automation-overview {
+  display: grid;
+  gap: 14px;
+}
+
+.automation-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.automation-overview-grid div,
+.automation-last-failure {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--surface);
+}
+
+:root[data-theme="dark"] .automation-overview-grid div,
+:root[data-theme="dark"] .automation-last-failure {
+  background: color-mix(in srgb, var(--surface) 72%, var(--surface-strong));
+}
+
+.automation-overview span,
+.automation-paths dt {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.automation-overview strong {
+  display: block;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-size: 15px;
+}
+
+.automation-overview-grid div:nth-child(1) span,
+:root[data-theme="dark"] .automation-overview-grid div:nth-child(1) span {
+  color: var(--green);
+}
+
+.automation-overview-grid div:nth-child(2) span,
+:root[data-theme="dark"] .automation-overview-grid div:nth-child(2) span {
+  color: var(--magenta);
+}
+
+.automation-overview-grid div:nth-child(3) span,
+:root[data-theme="dark"] .automation-overview-grid div:nth-child(3) span {
+  color: var(--cyan);
+}
+
+.automation-overview-grid div:nth-child(4) span,
+:root[data-theme="dark"] .automation-overview-grid div:nth-child(4) span {
+  color: var(--pink);
+}
+
+.automation-last-failure span,
+:root[data-theme="dark"] .automation-last-failure span {
+  color: var(--orange);
+}
+
+.automation-paths {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.automation-paths div {
+  display: grid;
+  grid-template-columns: 70px minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+}
+
+.automation-paths dt {
+  margin: 0;
+}
+
+.automation-paths dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+}
+
 .file-input {
   position: absolute;
   inline-size: 1px;
@@ -837,6 +929,34 @@ button:disabled {
   margin: 0;
   color: var(--muted);
   font-size: 13px;
+}
+
+.failure-details {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.failure-details summary {
+  width: fit-content;
+  color: var(--pink);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.failure-detail-list {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 0;
+}
+
+.failure-detail-list div {
+  min-width: 0;
+}
+
+.failure-detail-list dd {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
 }
 
 .automation-job-success h3 {

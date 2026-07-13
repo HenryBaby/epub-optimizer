@@ -33,9 +33,9 @@ def test_homepage_renders() -> None:
 
     assert response.status_code == 200
     assert "EPUB Optimizer" in response.text
-    assert "v1.1.1" in response.text
-    assert 'href="/static/favicon.png?v=1.1.1"' in response.text
-    assert 'href="/static/styles.css?v=1.1.1"' in response.text
+    assert "v1.1.2" in response.text
+    assert 'href="/static/favicon.png?v=1.1.2"' in response.text
+    assert 'href="/static/styles.css?v=1.1.2"' in response.text
     assert 'id="optimizer-form"' in response.text
     assert 'name="files"' in response.text
     assert 'id="source-picker"' in response.text
@@ -48,7 +48,7 @@ def test_homepage_renders() -> None:
     assert 'id="download-all"' in response.text
     assert 'id="automation-form"' in response.text
     assert 'id="automation-clear-history"' in response.text
-    assert 'src="/static/app.js?v=1.1.1"' in response.text
+    assert 'src="/static/app.js?v=1.1.2"' in response.text
 
 
 def test_automation_status_and_configuration() -> None:
@@ -244,7 +244,11 @@ def test_streaming_optimize_reports_unexpected_exception(monkeypatch: pytest.Mon
     error = next(event for event in events if event["type"] == "file_error")
 
     assert error["filename"] == "Broken.epub"
-    assert error["message"] == "Optimization failed unexpectedly: RuntimeError: boom"
+    assert error["message"] == "Optimization failed unexpectedly."
+    assert error["stage"] == "Preparing EPUB file"
+    assert error["exception_type"] == "RuntimeError"
+    assert error["detail"] == "RuntimeError: boom"
+    assert error["diagnostic"]["message"] == "Optimization failed unexpectedly."
 
 
 def test_streaming_optimize_accepts_multiple_files() -> None:

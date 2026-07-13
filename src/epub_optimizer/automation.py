@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from epub_optimizer.core import optimize_epub, optimized_filename
+from epub_optimizer.errors import FailureDiagnostic, failure_diagnostic
 
 WATCH_DIR = Path("/watch")
 AUTOMATION_OUTPUT_DIR = Path("/output")
@@ -40,6 +41,7 @@ class AutomationJob:
     output_filename: str | None
     elapsed_seconds: float | None
     updated_at: float
+    diagnostic: FailureDiagnostic | None = None
 
 
 class AutomationManager:
@@ -172,6 +174,11 @@ class AutomationManager:
             elapsed_seconds=None,
             updated_at=time.time(),
         )
+        stage = {"label": "Optimizing watched EPUB"}
+
+        def report(message: str) -> None:
+            stage["label"] = _stage_label_for_message(message)
+
         try:
             output_filename = (
                 optimized_filename(path.name)
@@ -179,7 +186,12 @@ class AutomationManager:
                 else _original_epub_name(path.name)
             )
             target_name = _unique_name(self.output_dir, output_filename)
-            result = optimize_epub(path, self.output_dir, output_filename=target_name)
+            result = optimize_epub(
+                path,
+                self.output_dir,
+                output_filename=target_name,
+                progress=report,
+            )
             path.unlink()
             self._record(
                 AutomationJob(
@@ -196,7 +208,15 @@ class AutomationManager:
             failed_path = _unique_path(self.failed_dir, path.name)
             with suppress(FileNotFoundError):
                 shutil.move(str(path), failed_path)
-            message = f"{type(exc).__name__}: {exc}"
+            message = _friendly_failure_message(exc)
+            report_path = _failure_report_path(failed_path)
+            diagnostic = failure_diagnostic(
+                exc,
+                stage=stage["label"],
+                message=message,
+                failed_path=failed_path.as_posix(),
+                report_path=report_path.as_posix(),
+            )
             self._record(
                 AutomationJob(
                     filename=path.name,
@@ -205,9 +225,10 @@ class AutomationManager:
                     output_filename=None,
                     elapsed_seconds=round(time.perf_counter() - started, 2),
                     updated_at=time.time(),
+                    diagnostic=diagnostic,
                 )
             )
-            _write_failure_report(failed_path, message)
+            _write_failure_report(failed_path, diagnostic)
         finally:
             self.current_job = None
 
@@ -261,6 +282,7 @@ class AutomationManager:
                         output_filename=item.get("output_filename"),
                         elapsed_seconds=item.get("elapsed_seconds"),
                         updated_at=float(item.get("updated_at", time.time())),
+                        diagnostic=_load_diagnostic(item.get("diagnostic")),
                     )
                 )
         return jobs
@@ -302,13 +324,17 @@ def _unique_path(directory: Path, filename: str) -> Path:
     return candidate
 
 
-def _write_failure_report(failed_path: Path, message: str) -> None:
-    report_path = failed_path.with_name(f"{failed_path.name}.error.json")
+def _failure_report_path(failed_path: Path) -> Path:
+    return failed_path.with_name(f"{failed_path.name}.error.json")
+
+
+def _write_failure_report(failed_path: Path, diagnostic: FailureDiagnostic) -> None:
+    report_path = _failure_report_path(failed_path)
     report_path.write_text(
         json.dumps(
             {
                 "filename": failed_path.name,
-                "message": message,
+                "diagnostic": diagnostic.to_dict(),
                 "updated_at": time.time(),
             },
             ensure_ascii=False,
@@ -316,3 +342,47 @@ def _write_failure_report(failed_path: Path, message: str) -> None:
         ),
         encoding="utf-8",
     )
+
+
+def _load_diagnostic(value: object) -> FailureDiagnostic | None:
+    if not isinstance(value, dict):
+        return None
+    return FailureDiagnostic(
+        stage=str(value.get("stage", "Unknown stage")),
+        message=str(value.get("message", "Optimization failed.")),
+        exception_type=str(value.get("exception_type", "Exception")),
+        detail=str(value.get("detail", "")),
+        internal_path=_optional_str(value.get("internal_path")),
+        failed_path=_optional_str(value.get("failed_path")),
+        report_path=_optional_str(value.get("report_path")),
+    )
+
+
+def _optional_str(value: object) -> str | None:
+    if value is None:
+        return None
+    return str(value)
+
+
+def _stage_label_for_message(message: str) -> str:
+    normalized = message.lower()
+    if "validated epub archive" in normalized:
+        return "Validating EPUB archive"
+    if "extracted epub" in normalized:
+        return "Extracting EPUB workspace"
+    if "resolved opf package" in normalized:
+        return "Resolving package document"
+    if "removed" in normalized and "manifest" in normalized:
+        return "Cleaning old manifest entries"
+    if "deleted" in normalized and "style/font file" in normalized:
+        return "Deleting old style and font files"
+    if "processed" in normalized and "content document" in normalized:
+        return "Normalizing content documents"
+    if "repackaged optimized epub" in normalized:
+        return "Repackaging optimized EPUB"
+    return message
+
+
+def _friendly_failure_message(exc: BaseException) -> str:
+    message = str(exc)
+    return message if message else "Optimization failed unexpectedly."
