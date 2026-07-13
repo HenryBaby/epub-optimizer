@@ -1,5 +1,10 @@
 # EPUB Optimizer
 
+[![Release](https://img.shields.io/github/v/release/HenryBaby/epub-optimizer?sort=semver)](https://github.com/HenryBaby/epub-optimizer/releases)
+[![Docker downloads](https://ghcr-badge.elias.eu.org/shield/HenryBaby/epub-optimizer/epub-optimizer?label=docker%20downloads)](https://github.com/HenryBaby/epub-optimizer/pkgs/container/epub-optimizer)
+[![Stars](https://img.shields.io/github/stars/HenryBaby/epub-optimizer?style=flat)](https://github.com/HenryBaby/epub-optimizer/stargazers)
+[![Master CI](https://github.com/HenryBaby/epub-optimizer/actions/workflows/docker.yml/badge.svg?branch=main)](https://github.com/HenryBaby/epub-optimizer/actions/workflows/docker.yml)
+
 A local, Dockerized web app for normalizing EPUB files into a consistent house
 style.
 
