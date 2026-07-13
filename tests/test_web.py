@@ -5,15 +5,25 @@ from io import BytesIO
 import pytest
 from fastapi.testclient import TestClient
 
+from epub_optimizer.automation import AutomationManager
 from epub_optimizer.web import app
 
 
 @pytest.fixture(autouse=True)
 def output_base_dir(tmp_path):
     app.state.output_base_dir = tmp_path
+    app.state.automation_manager = AutomationManager(
+        watch_dir=tmp_path / "watch",
+        output_dir=tmp_path / "automation-output",
+        failed_dir=tmp_path / "failed",
+        config_path=tmp_path / "automation-config.json",
+        history_path=tmp_path / "automation-history.json",
+    )
     yield
     if hasattr(app.state, "output_base_dir"):
         del app.state.output_base_dir
+    if hasattr(app.state, "automation_manager"):
+        del app.state.automation_manager
 
 
 def test_homepage_renders() -> None:
@@ -36,7 +46,39 @@ def test_homepage_renders() -> None:
     assert 'id="file-summary"' in response.text
     assert 'id="progress-meter"' in response.text
     assert 'id="download-all"' in response.text
+    assert 'id="automation-form"' in response.text
     assert 'src="/static/app.js?v=1.0.6"' in response.text
+
+
+def test_automation_status_and_configuration() -> None:
+    client = TestClient(app)
+
+    response = client.get("/automation")
+
+    assert response.status_code == 200
+    status = response.json()
+    assert status["config"]["enabled"] is False
+    assert status["config"]["append_suffix"] is True
+    assert status["paths"]["watch_dir"].endswith("watch")
+
+    update = client.post(
+        "/automation",
+        json={
+            "enabled": True,
+            "append_suffix": False,
+            "poll_seconds": 4,
+            "stable_seconds": 5,
+        },
+    )
+
+    assert update.status_code == 200
+    updated = update.json()["config"]
+    assert updated == {
+        "enabled": True,
+        "append_suffix": False,
+        "poll_seconds": 4,
+        "stable_seconds": 5,
+    }
 
 
 def test_streaming_optimize_handles_url_significant_filename_chars() -> None:

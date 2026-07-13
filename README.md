@@ -37,9 +37,15 @@ Open:
 http://localhost:4200
 ```
 
-The app stores generated downloads under `/data` inside the container, mounted
-through the `epub_optimizer_data` Docker volume. Downloaded EPUBs and ZIP
-archives are removed from that storage after they are served.
+The default Compose file mounts:
+
+- `/data` for app state and temporary manual downloads
+- `/watch` for optional watched-folder automation input
+- `/output` for optimized files produced by automation
+
+Replace the `/output` mount with your library manager bookdrop folder when using
+automation. Manual downloads and ZIP archives are removed from `/data` after
+they are served.
 
 ## Local Docker Build
 

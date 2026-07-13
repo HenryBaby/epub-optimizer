@@ -8,18 +8,20 @@ import tempfile
 import uuid
 import zipfile
 from collections.abc import AsyncIterator
-from contextlib import suppress
+from contextlib import asynccontextmanager, suppress
+from dataclasses import asdict
 from pathlib import Path
 from typing import Annotated
 from urllib.parse import quote
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.background import BackgroundTask
 
 from epub_optimizer import __version__
+from epub_optimizer.automation import AutomationManager
 from epub_optimizer.core import optimize_epub, optimized_filename
 from epub_optimizer.errors import EpubOptimizerError
 
@@ -28,8 +30,19 @@ OUTPUT_BASE_DIR = Path("/data")
 MAX_UPLOAD_MB = int(os.getenv("EPUB_OPTIMIZER_MAX_UPLOAD_MB", "100"))
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 LOGGER = logging.getLogger(__name__)
+AUTOMATION_MANAGER = AutomationManager()
 
-app = FastAPI(title="EPUB Optimizer")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    await _automation_manager().start()
+    try:
+        yield
+    finally:
+        await _automation_manager().stop()
+
+
+app = FastAPI(title="EPUB Optimizer", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
@@ -46,6 +59,20 @@ def index(request: Request) -> HTMLResponse:
             "error": None,
         },
     )
+
+
+@app.get("/automation")
+def automation_status() -> JSONResponse:
+    return JSONResponse(_automation_manager().status())
+
+
+@app.post("/automation")
+async def configure_automation(request: Request) -> JSONResponse:
+    payload = await request.json()
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Automation configuration must be an object.")
+    config = await _automation_manager().update_config(payload)
+    return JSONResponse({"config": asdict(config), "status": _automation_manager().status()})
 
 
 @app.post("/optimize")
@@ -336,6 +363,10 @@ def _render_error(request: Request, message: str) -> HTMLResponse:
 def _persistent_output_dir() -> Path:
     output_base = getattr(app.state, "output_base_dir", OUTPUT_BASE_DIR)
     return Path(output_base) / "epub-optimizer"
+
+
+def _automation_manager() -> AutomationManager:
+    return getattr(app.state, "automation_manager", AUTOMATION_MANAGER)
 
 
 def _remove_download(path: Path) -> None:

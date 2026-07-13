@@ -16,6 +16,18 @@ const resultsList = document.querySelector("#results-list");
 const downloadAll = document.querySelector("#download-all");
 const fileSummary = document.querySelector("#file-summary");
 const themeToggle = document.querySelector("#theme-toggle");
+const automationForm = document.querySelector("#automation-form");
+const automationEnabled = document.querySelector("#automation-enabled");
+const automationAppendSuffix = document.querySelector("#automation-append-suffix");
+const automationPollSeconds = document.querySelector("#automation-poll-seconds");
+const automationStableSeconds = document.querySelector("#automation-stable-seconds");
+const automationPill = document.querySelector("#automation-pill");
+const automationWatchDir = document.querySelector("#automation-watch-dir");
+const automationOutputDir = document.querySelector("#automation-output-dir");
+const automationFailedDir = document.querySelector("#automation-failed-dir");
+const automationCurrentJob = document.querySelector("#automation-current-job");
+const automationSummary = document.querySelector("#automation-summary");
+const automationHistory = document.querySelector("#automation-history");
 
 let queueTotal = 0;
 let queueCompleted = 0;
@@ -37,6 +49,8 @@ const taskRows = new Map();
 initializeTheme();
 initializeTasks();
 updateFileSummary();
+loadAutomation();
+setInterval(loadAutomation, 5000);
 
 themeToggle.addEventListener("change", () => {
   setTheme(themeToggle.checked ? "dark" : "light");
@@ -136,6 +150,27 @@ form.addEventListener("submit", async (event) => {
   } finally {
     setBusy(false);
   }
+});
+
+automationForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const payload = {
+    enabled: automationEnabled.checked,
+    append_suffix: automationAppendSuffix.checked,
+    poll_seconds: Number.parseInt(automationPollSeconds.value, 10),
+    stable_seconds: Number.parseInt(automationStableSeconds.value, 10),
+  };
+  const response = await fetch("/automation", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    automationPill.textContent = "Error";
+    return;
+  }
+  const data = await response.json();
+  renderAutomation(data.status);
 });
 
 async function readEventStream(stream) {
@@ -543,4 +578,62 @@ function setTheme(theme) {
   document.documentElement.dataset.theme = theme;
   themeToggle.checked = theme === "dark";
   localStorage.setItem("epubOptimizerTheme", theme);
+}
+
+async function loadAutomation() {
+  try {
+    const response = await fetch("/automation", { cache: "no-store" });
+    if (!response.ok) {
+      throw new Error("Automation status unavailable.");
+    }
+    renderAutomation(await response.json());
+  } catch (_error) {
+    automationPill.textContent = "Unavailable";
+  }
+}
+
+function renderAutomation(status) {
+  const config = status.config || {};
+  const paths = status.paths || {};
+  automationEnabled.checked = Boolean(config.enabled);
+  automationAppendSuffix.checked = config.append_suffix !== false;
+  automationPollSeconds.value = config.poll_seconds || 10;
+  automationStableSeconds.value = config.stable_seconds || 15;
+  automationWatchDir.textContent = paths.watch_dir || "/watch";
+  automationOutputDir.textContent = paths.output_dir || "/output";
+  automationFailedDir.textContent = paths.failed_dir || "/data/failed";
+  automationPill.textContent = config.enabled ? "Watching" : "Disabled";
+
+  if (status.current_job) {
+    automationCurrentJob.textContent = status.current_job.filename;
+  } else {
+    automationCurrentJob.textContent = "None";
+  }
+
+  const history = status.history || [];
+  automationSummary.textContent =
+    history.length === 0 ? "No jobs yet" : `${history.length} recent job${history.length === 1 ? "" : "s"}`;
+  automationHistory.replaceChildren();
+  for (const job of history) {
+    automationHistory.append(createAutomationJob(job));
+  }
+}
+
+function createAutomationJob(job) {
+  const item = document.createElement("article");
+  item.className = `automation-job automation-job-${job.status}`;
+
+  const title = document.createElement("h3");
+  title.textContent =
+    job.status === "success"
+      ? `${job.filename} -> ${job.output_filename}`
+      : `${job.filename} failed`;
+
+  const detail = document.createElement("p");
+  const elapsed =
+    typeof job.elapsed_seconds === "number" ? ` ${job.elapsed_seconds.toFixed(2)}s.` : "";
+  detail.textContent = `${job.message || "No details."}${elapsed}`;
+
+  item.append(title, detail);
+  return item;
 }

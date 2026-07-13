@@ -9,7 +9,13 @@ services:
       EPUB_OPTIMIZER_MAX_UPLOAD_MB: "100"
     volumes:
       - epubo_data:/data
+      - epubo_watch:/watch
+      - epubo_output:/output
 
 volumes:
   epubo_data:
-    name: epubo_data 
+    name: epubo_data
+  epubo_watch:
+    name: epubo_watch
+  epubo_output:
+    name: epubo_output

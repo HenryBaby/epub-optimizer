@@ -11,8 +11,8 @@ COPY src ./src
 RUN pip install --no-cache-dir .
 
 RUN adduser --disabled-password --gecos "" appuser \
-    && mkdir -p /data \
-    && chown -R appuser:appuser /data
+    && mkdir -p /data /watch /output \
+    && chown -R appuser:appuser /data /watch /output
 
 USER appuser
 

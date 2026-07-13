@@ -226,6 +226,7 @@ button:focus-visible,
 
 .upload-panel,
 .progress-panel,
+.automation-panel,
 .result {
   padding: 22px;
 }
@@ -284,6 +285,17 @@ button:focus-visible,
 form {
   display: grid;
   gap: 16px;
+}
+
+.automation-grid {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.9fr) minmax(320px, 1.1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.automation-form {
+  align-content: start;
 }
 
 .file-input {
@@ -442,6 +454,24 @@ form {
   color: var(--pink);
   font-family: inherit;
   font-weight: 800;
+}
+
+.field-row {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.field-row input {
+  min-height: 40px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--surface-strong);
+  color: var(--text);
+  font: inherit;
 }
 
 button:not(.dropzone-main):not(.folder-link),
@@ -735,6 +765,37 @@ button:disabled {
   gap: 8px;
 }
 
+.automation-history {
+  margin-top: 12px;
+}
+
+.automation-job {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  background: color-mix(in srgb, var(--surface) 62%, transparent);
+}
+
+.automation-job h3 {
+  margin: 0 0 6px;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+}
+
+.automation-job p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.automation-job-success h3 {
+  color: var(--green);
+}
+
+.automation-job-failed h3 {
+  color: var(--danger);
+}
+
 .result-item {
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -882,8 +943,13 @@ dd {
 
   .upload-panel,
   .progress-panel,
+  .automation-panel,
   .result {
     padding: 16px;
+  }
+
+  .automation-grid {
+    grid-template-columns: 1fr;
   }
 
   .dropzone {

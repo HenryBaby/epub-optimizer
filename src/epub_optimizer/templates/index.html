@@ -95,6 +95,65 @@
         </div>
       </section>
 
+      <section class="panel automation-panel">
+        <div class="panel-heading">
+          <div>
+            <h2>Automation</h2>
+            <p>Watch a local EPUB drop folder and send optimized files to the output folder.</p>
+          </div>
+          <span class="status-pill" id="automation-pill">Idle</span>
+        </div>
+
+        <div class="automation-grid">
+          <form id="automation-form" class="automation-form">
+            <label class="filename-option" for="automation-enabled">
+              <input id="automation-enabled" name="enabled" type="checkbox">
+              <span>Enable watched-folder automation</span>
+            </label>
+            <label class="filename-option" for="automation-append-suffix">
+              <input id="automation-append-suffix" name="append_suffix" type="checkbox" checked>
+              <span>Append <code>-optimized</code> to automatic output filenames</span>
+            </label>
+            <label class="field-row" for="automation-poll-seconds">
+              <span>Poll interval</span>
+              <input id="automation-poll-seconds" name="poll_seconds" type="number" min="3" max="3600" step="1">
+            </label>
+            <label class="field-row" for="automation-stable-seconds">
+              <span>File stability wait</span>
+              <input id="automation-stable-seconds" name="stable_seconds" type="number" min="3" max="3600" step="1">
+            </label>
+            <button id="automation-save" type="submit">Save automation</button>
+          </form>
+
+          <div>
+            <dl class="stats automation-stats">
+              <div>
+                <dt>Watch folder</dt>
+                <dd id="automation-watch-dir">/watch</dd>
+              </div>
+              <div>
+                <dt>Output folder</dt>
+                <dd id="automation-output-dir">/output</dd>
+              </div>
+              <div>
+                <dt>Failed folder</dt>
+                <dd id="automation-failed-dir">/data/failed</dd>
+              </div>
+              <div>
+                <dt>Current job</dt>
+                <dd id="automation-current-job">None</dd>
+              </div>
+            </dl>
+          </div>
+        </div>
+
+        <div class="log-heading">
+          <h3>Automatic jobs</h3>
+          <span id="automation-summary">No jobs yet</span>
+        </div>
+        <div id="automation-history" class="results-list automation-history"></div>
+      </section>
+
       <section id="results-panel" class="panel result" hidden>
         <div class="panel-heading">
           <div>
