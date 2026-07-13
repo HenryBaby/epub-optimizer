@@ -34,6 +34,7 @@ def test_optimize_minimal_epub(tmp_path: Path) -> None:
     assert 'class="eo-chapter"' in chapter
     assert 'class="eo-first"' in chapter
     assert 'class="eo-body"' in chapter
+    assert 'class="eo-strike"' in chapter
     assert 'style="' not in chapter
     assert 'class="publisher"' not in chapter
     normalized_css = css.replace("\r\n", "\n")
@@ -46,8 +47,13 @@ def test_optimize_minimal_epub(tmp_path: Path) -> None:
     with zipfile.ZipFile(second_result.output_path) as archive:
         assert "OEBPS/Styles/epub-optimizer.css" in archive.namelist()
         second_opf = archive.read("OEBPS/content.opf").decode("utf-8")
+        second_chapter = archive.read("OEBPS/Text/chapter.xhtml").decode("utf-8")
 
     assert second_opf.count("epub-optimizer.css") == 1
+    assert 'class="eo-chapter"' in second_chapter
+    assert 'class="eo-first"' in second_chapter
+    assert 'class="eo-body"' in second_chapter
+    assert 'class="eo-strike"' in second_chapter
 
 
 def test_optimize_root_opf_anonymous_div_chapter(tmp_path: Path) -> None:
@@ -187,6 +193,18 @@ def test_optimize_opening_epigraph_resets_first_body_paragraph(tmp_path: Path) -
     assert '<p class="eo-extract"><b>--The Stolen Journals</b></p>' in chapter
     assert '<p class="eo-first">The first narrative paragraph starts here.</p>' in chapter
     assert '<p class="eo-body">The following paragraph continues the same scene.</p>' in chapter
+
+    second_result = optimize_epub(result.output_path, tmp_path / "out-epigraph-second")
+    with zipfile.ZipFile(second_result.output_path) as archive:
+        second_chapter = archive.read("OEBPS/chapter.xhtml").decode("utf-8")
+
+    assert '<p class="eo-extract"><i>This is a long opening epigraph' in second_chapter
+    assert '<p class="eo-extract"><b>--The Stolen Journals</b></p>' in second_chapter
+    assert '<p class="eo-first">The first narrative paragraph starts here.</p>' in second_chapter
+    assert (
+        '<p class="eo-body">The following paragraph continues the same scene.</p>'
+        in second_chapter
+    )
 
 
 def test_optimize_narrative_prologue_uses_body_flow(tmp_path: Path) -> None:
@@ -383,7 +401,8 @@ def _write_minimal_epub(path: Path) -> None:
   <body>
     <h1 class="chapter">Chapter One</h1>
     <p class="nonindent" style="margin: 2em;">First paragraph with <em>emphasis</em>.</p>
-    <p class="indent"><span class="publisher">Second</span> paragraph.</p>
+    <p class="indent"><span class="publisher">Second</span> paragraph with
+    <span class="strike">struck text</span>.</p>
   </body>
 </html>
 """,

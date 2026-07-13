@@ -95,6 +95,54 @@ FRONT_MATTER_HINTS = {
     "toc",
     "title",
 }
+EO_BLOCK_ROLES = {
+    "eo-blockquote",
+    "eo-body",
+    "eo-caption",
+    "eo-centered",
+    "eo-chapter",
+    "eo-dedication",
+    "eo-extract",
+    "eo-first",
+    "eo-footnote",
+    "eo-front",
+    "eo-front-body",
+    "eo-front-list-item",
+    "eo-front-section",
+    "eo-hanging",
+    "eo-image",
+    "eo-letter",
+    "eo-letter-attribution",
+    "eo-letter-body",
+    "eo-letter-first",
+    "eo-letter-opener",
+    "eo-list",
+    "eo-metadata-line",
+    "eo-metadata-page",
+    "eo-metadata-title",
+    "eo-part",
+    "eo-poetry",
+    "eo-right",
+    "eo-scene-break",
+    "eo-section",
+    "eo-title-author",
+    "eo-title-credit",
+    "eo-title-credit-label",
+    "eo-title-main",
+    "eo-title-page",
+    "eo-title-publisher",
+    "eo-toc",
+    "eo-toc-chapter",
+    "eo-toc-entry",
+    "eo-toc-heading",
+    "eo-toc-part",
+}
+EO_INLINE_ROLES = {
+    "eo-overline",
+    "eo-smallcaps",
+    "eo-strike",
+    "eo-underline",
+}
 
 
 def optimize_epub(
@@ -828,7 +876,10 @@ def _unwrap_font_elements(root: etree._Element) -> None:
 def _normalize_inline_spans(root: etree._Element) -> None:
     for span in root.xpath("//*[local-name()='span']"):
         classes = set(span.attrib.get("class", "").lower().split())
-        if classes & {"bold"}:
+        existing_role = _existing_optimizer_inline_role(classes)
+        if existing_role:
+            _replace_classes(span, existing_role)
+        elif classes & {"bold"}:
             _rename_element(span, "strong")
             span.attrib.pop("class", None)
         elif classes & {"italic", "ital"}:
@@ -862,6 +913,28 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
     for element in root.xpath("//*[local-name()='body']//*[self::*]"):
         local = etree.QName(element).localname.lower()
         source_classes = set(element.attrib.get("class", "").lower().split())
+        existing_role = _existing_optimizer_block_role(source_classes)
+        if existing_role and local in {
+            "aside",
+            "blockquote",
+            "div",
+            "figcaption",
+            "figure",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+            "ol",
+            "p",
+            "section",
+            "ul",
+        }:
+            _replace_classes(element, existing_role)
+            after_boundary = _role_creates_boundary(existing_role)
+            opening_epigraph = existing_role in {"eo-extract", "eo-scene-break"}
+            continue
 
         if local in {"h1", "h2", "h3", "h4", "h5", "h6"}:
             if document_role == "toc":
@@ -1201,6 +1274,50 @@ def _heading_role(local: str, classes: set[str], is_front_matter: bool) -> str:
     if "section" in classes or local not in {"h1"}:
         return "eo-section"
     return "eo-chapter"
+
+
+def _existing_optimizer_block_role(classes: set[str]) -> str | None:
+    for role in sorted(classes):
+        if role in EO_BLOCK_ROLES:
+            return role
+    return None
+
+
+def _existing_optimizer_inline_role(classes: set[str]) -> str | None:
+    for role in sorted(classes):
+        if role in EO_INLINE_ROLES:
+            return role
+    return None
+
+
+def _role_creates_boundary(role: str) -> bool:
+    return role in {
+        "eo-caption",
+        "eo-centered",
+        "eo-chapter",
+        "eo-dedication",
+        "eo-extract",
+        "eo-footnote",
+        "eo-front",
+        "eo-front-list-item",
+        "eo-front-section",
+        "eo-image",
+        "eo-letter-attribution",
+        "eo-metadata-line",
+        "eo-metadata-title",
+        "eo-part",
+        "eo-poetry",
+        "eo-right",
+        "eo-scene-break",
+        "eo-section",
+        "eo-title-author",
+        "eo-title-main",
+        "eo-title-publisher",
+        "eo-toc-chapter",
+        "eo-toc-entry",
+        "eo-toc-heading",
+        "eo-toc-part",
+    }
 
 
 def _paragraph_role(
