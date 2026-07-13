@@ -7,11 +7,11 @@
     <link
       rel="icon"
       type="image/png"
-      href="{{ url_for('static', path='/favicon.png') }}?v={{ app_version }}"
+      href="/static/favicon.png?v={{ app_version }}"
     >
     <link
       rel="stylesheet"
-      href="{{ url_for('static', path='/styles.css') }}?v={{ app_version }}"
+      href="/static/styles.css?v={{ app_version }}"
     >
   </head>
   <body>
@@ -106,6 +106,6 @@
         <div id="results-list" class="results-list"></div>
       </section>
     </main>
-    <script src="{{ url_for('static', path='/app.js') }}?v={{ app_version }}"></script>
+    <script src="/static/app.js?v={{ app_version }}"></script>
   </body>
 </html>
