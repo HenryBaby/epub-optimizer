@@ -915,6 +915,17 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
         local = etree.QName(element).localname.lower()
         source_classes = set(element.attrib.get("class", "").lower().split())
         if local in {"h1", "h2", "h3", "h4", "h5", "h6"}:
+            existing_role = _existing_optimizer_block_role(source_classes)
+            if existing_role and not _should_reclassify_heading_role(
+                existing_role,
+                document_role,
+                local,
+                source_classes,
+            ):
+                _replace_classes(element, existing_role)
+                after_boundary = _role_creates_boundary(existing_role)
+                opening_epigraph = False
+                continue
             if document_role == "toc":
                 _replace_classes(element, "eo-toc-heading")
                 after_boundary = True
@@ -1271,6 +1282,23 @@ def _heading_role(local: str, classes: set[str], is_front_matter: bool) -> str:
     if "section" in classes or local not in {"h1"}:
         return "eo-section"
     return "eo-chapter"
+
+
+def _should_reclassify_heading_role(
+    existing_role: str,
+    document_role: str,
+    local: str,
+    classes: set[str],
+) -> bool:
+    if existing_role not in {"eo-centered", "eo-right"}:
+        return False
+    if document_role in {"dedication", "front", "metadata", "title", "toc", "works"}:
+        return False
+    return bool(
+        local == "h1"
+        or "eo-chapter" in classes
+        or any(cls.startswith("chapter") for cls in classes)
+    )
 
 
 def _existing_optimizer_block_role(classes: set[str]) -> str | None:

@@ -293,6 +293,27 @@ def test_optimize_narrative_chapter_with_metadata_like_words(tmp_path: Path) -> 
     assert "eo-metadata" not in chapter
 
 
+def test_optimize_preserves_existing_semantic_heading_roles(tmp_path: Path) -> None:
+    source = tmp_path / "semantic-heading-roles.epub"
+    _write_semantic_heading_roles_epub(source)
+
+    result = optimize_epub(source, tmp_path / "out-semantic-heading-roles")
+
+    with zipfile.ZipFile(result.output_path) as archive:
+        toc = archive.read("OEBPS/toc.xhtml").decode("utf-8")
+        front = archive.read("OEBPS/ack.xhtml").decode("utf-8")
+        metadata = archive.read("OEBPS/info.xhtml").decode("utf-8")
+        image = archive.read("OEBPS/image-title.xhtml").decode("utf-8")
+        chapter = archive.read("OEBPS/chapter.xhtml").decode("utf-8")
+
+    assert '<h1 class="eo-centered">Contents</h1>' in toc
+    assert '<h1 class="eo-metadata-title">Acknowledgements</h1>' in front
+    assert '<h1 class="eo-metadata-title">Edition Information</h1>' in metadata
+    assert '<h1 class="eo-image">Illustrated Title</h1>' in image
+    assert '<h1 class="eo-chapter">Chapter One</h1>' in chapter
+    assert '<h1 class="eo-right">Chapter One</h1>' not in chapter
+
+
 def test_optimize_swedish_filename_does_not_trigger_front_matter_hint(tmp_path: Path) -> None:
     source = tmp_path / "swedish.epub"
     _write_swedish_filename_epub(source)
@@ -1280,6 +1301,79 @@ def _write_metadata_like_chapter_epub(path: Path) -> None:
 </html>
 """,
         )
+
+
+def _write_semantic_heading_roles_epub(path: Path) -> None:
+    docs = {
+        "OEBPS/toc.xhtml": '<h1 class="eo-centered">Contents</h1><p>Chapter One</p>',
+        "OEBPS/ack.xhtml": '<h1 class="eo-metadata-title">Acknowledgements</h1><p>Thanks.</p>',
+        "OEBPS/info.xhtml": (
+            '<h1 class="eo-metadata-title">Edition Information</h1>'
+            '<p>Original title: Example</p><p>ePub base r2.1</p>'
+        ),
+        "OEBPS/image-title.xhtml": '<h1 class="eo-image">Illustrated Title</h1><p>Caption.</p>',
+        "OEBPS/chapter.xhtml": (
+            '<h1 class="eo-right">Chapter One</h1>'
+            '<p>First narrative paragraph.</p><p>Second narrative paragraph.</p>'
+        ),
+    }
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr(
+            "mimetype",
+            "application/epub+zip",
+            compress_type=zipfile.ZIP_STORED,
+        )
+        archive.writestr(
+            "META-INF/container.xml",
+            """<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>
+""",
+        )
+        archive.writestr(
+            "content.opf",
+            """<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="id" version="3.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="id">urn:test-semantic-heading-roles</dc:identifier>
+    <dc:title>Semantic Heading Roles Test</dc:title>
+    <dc:language>en</dc:language>
+  </metadata>
+  <manifest>
+    <item id="css" href="Styles/epub-optimizer.css" media-type="text/css"/>
+    <item id="toc" href="OEBPS/toc.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ack" href="OEBPS/ack.xhtml" media-type="application/xhtml+xml"/>
+    <item id="info" href="OEBPS/info.xhtml" media-type="application/xhtml+xml"/>
+    <item id="image-title" href="OEBPS/image-title.xhtml" media-type="application/xhtml+xml"/>
+    <item id="chapter" href="OEBPS/chapter.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="toc"/>
+    <itemref idref="ack"/>
+    <itemref idref="info"/>
+    <itemref idref="image-title"/>
+    <itemref idref="chapter"/>
+  </spine>
+</package>
+""",
+        )
+        archive.writestr("Styles/epub-optimizer.css", "body { font-family: inherit; }")
+        for name, body in docs.items():
+            archive.writestr(
+                name,
+                f"""<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <title>Semantic Heading Roles Test</title>
+    <link href="../Styles/epub-optimizer.css" rel="stylesheet" type="text/css"/>
+  </head>
+  <body>{body}</body>
+</html>
+""",
+            )
 
 
 def _write_swedish_filename_epub(path: Path) -> None:
