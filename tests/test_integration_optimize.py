@@ -31,7 +31,8 @@ def test_optimize_minimal_epub(tmp_path: Path) -> None:
     assert "publisher.woff2" not in opf
     assert "page-template.xpgt" not in opf
     assert "../Styles/epub-optimizer.css" in chapter
-    assert 'class="eo-chapter"' in chapter
+    assert '<h1 class="eo-chapter">Chapter One</h1>' in chapter
+    assert 'class="eo-right">Chapter One' not in chapter
     assert 'class="eo-first"' in chapter
     assert 'class="eo-body"' in chapter
     assert 'class="eo-strike"' in chapter
@@ -42,6 +43,8 @@ def test_optimize_minimal_epub(tmp_path: Path) -> None:
     assert "p {\n  margin: 0 0 0.75em;" in normalized_css
     assert "p.eo-body {\n  text-indent: 0;" in normalized_css
     assert "p.eo-first {\n  text-indent: 1em;" in normalized_css
+    assert "h1.eo-chapter,\nh2.eo-chapter,\nh3.eo-chapter" in normalized_css
+    assert "font-weight: bold;\n  text-align: center;" in normalized_css
 
     second_result = optimize_epub(result.output_path, tmp_path / "out-second")
     with zipfile.ZipFile(second_result.output_path) as archive:
@@ -50,7 +53,7 @@ def test_optimize_minimal_epub(tmp_path: Path) -> None:
         second_chapter = archive.read("OEBPS/Text/chapter.xhtml").decode("utf-8")
 
     assert second_opf.count("epub-optimizer.css") == 1
-    assert 'class="eo-chapter"' in second_chapter
+    assert '<h1 class="eo-chapter">Chapter One</h1>' in second_chapter
     assert 'class="eo-first"' in second_chapter
     assert 'class="eo-body"' in second_chapter
     assert 'class="eo-strike"' in second_chapter
@@ -275,6 +278,21 @@ def test_optimize_metadata_pages_do_not_use_body_flow(tmp_path: Path) -> None:
     assert "eo-metadata-line" in css
 
 
+def test_optimize_narrative_chapter_with_metadata_like_words(tmp_path: Path) -> None:
+    source = tmp_path / "metadata-like-chapter.epub"
+    _write_metadata_like_chapter_epub(source)
+
+    result = optimize_epub(source, tmp_path / "out-metadata-like")
+
+    with zipfile.ZipFile(result.output_path) as archive:
+        chapter = archive.read("OEBPS/chapter.xhtml").decode("utf-8")
+
+    assert '<h1 class="eo-chapter">Cities &amp; The Sky 2</h1>' in chapter
+    assert '<p class="eo-first">This belief is handed down in Beersheba:' in chapter
+    assert '<p class="eo-body">They also believe, these inhabitants,' in chapter
+    assert "eo-metadata" not in chapter
+
+
 def test_optimize_swedish_filename_does_not_trigger_front_matter_hint(tmp_path: Path) -> None:
     source = tmp_path / "swedish.epub"
     _write_swedish_filename_epub(source)
@@ -399,7 +417,7 @@ def _write_minimal_epub(path: Path) -> None:
     <link href="../Styles/old.css" rel="stylesheet" type="text/css"/>
   </head>
   <body>
-    <h1 class="chapter">Chapter One</h1>
+    <h1 class="chapter" style="text-align: right;">Chapter One</h1>
     <p class="nonindent" style="margin: 2em;">First paragraph with <em>emphasis</em>.</p>
     <p class="indent"><span class="publisher">Second</span> paragraph with
     <span class="strike">struck text</span>.</p>
@@ -1200,6 +1218,64 @@ def _write_metadata_page_epub(path: Path) -> None:
     <p>Original title: <cite>Example</cite></p>
     <p>Digital editor: Example Editor</p>
     <p>ePub base r2.1</p>
+  </body>
+</html>
+""",
+        )
+
+
+def _write_metadata_like_chapter_epub(path: Path) -> None:
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr(
+            "mimetype",
+            "application/epub+zip",
+            compress_type=zipfile.ZIP_STORED,
+        )
+        archive.writestr(
+            "META-INF/container.xml",
+            """<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>
+""",
+        )
+        archive.writestr(
+            "content.opf",
+            """<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="id" version="3.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="id">urn:test-metadata-like-chapter</dc:identifier>
+    <dc:title>Metadata-like Chapter Test</dc:title>
+    <dc:language>en</dc:language>
+  </metadata>
+  <manifest>
+    <item id="chapter" href="OEBPS/chapter.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="chapter"/>
+  </spine>
+</package>
+""",
+        )
+        archive.writestr(
+            "OEBPS/chapter.xhtml",
+            """<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head><title>Metadata-like Chapter Test</title></head>
+  <body>
+    <h1 style="text-align: right;">Cities &amp; The Sky 2</h1>
+    <p>This belief is handed down in Beersheba: that, suspended in the heavens,
+    there exists another Beersheba, where the city’s most elevated virtues and
+    sentiments are poised, and that the earthly city takes its shape from those
+    ideals.</p>
+    <p>They also believe, these inhabitants, that another Beersheba exists
+    underground, the receptacle of everything base and unworthy that happens to
+    them, and it is their constant care to erase every version of that city from
+    their minds.</p>
+    <p>Intent on piling up its carats of perfection, Beersheba takes for virtue
+    what is now a grim mania to fill the empty vessel of itself.</p>
   </body>
 </html>
 """,

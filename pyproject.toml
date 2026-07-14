@@ -1,6 +1,6 @@
 [project]
 name = "epub-optimizer"
-version = "1.1.4"
+version = "1.1.5"
 description = "A small local web app for normalizing EPUB typography into a stable house style."
 readme = "README.md"
 requires-python = ">=3.12"

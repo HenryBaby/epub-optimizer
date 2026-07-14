@@ -662,11 +662,12 @@ def _looks_like_metadata_page(root: etree._Element) -> bool:
     combined = " ".join(texts).lower()
     metadata_hits = sum(1 for text in texts if _is_metadata_line_text(text))
     short_count = sum(1 for text in texts if len(text) <= 90)
+    short_ratio = short_count / len(texts)
     return (
-        metadata_hits >= 2
+        (metadata_hits >= 2 and short_ratio >= 0.5)
         or (
             metadata_hits >= 1
-            and short_count / len(texts) >= 0.75
+            and short_ratio >= 0.75
             and any(token in combined for token in {"epub", "isbn", "copyright", "editor"})
         )
     )
@@ -913,29 +914,6 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
     for element in root.xpath("//*[local-name()='body']//*[self::*]"):
         local = etree.QName(element).localname.lower()
         source_classes = set(element.attrib.get("class", "").lower().split())
-        existing_role = _existing_optimizer_block_role(source_classes)
-        if existing_role and local in {
-            "aside",
-            "blockquote",
-            "div",
-            "figcaption",
-            "figure",
-            "h1",
-            "h2",
-            "h3",
-            "h4",
-            "h5",
-            "h6",
-            "ol",
-            "p",
-            "section",
-            "ul",
-        }:
-            _replace_classes(element, existing_role)
-            after_boundary = _role_creates_boundary(existing_role)
-            opening_epigraph = existing_role in {"eo-extract", "eo-scene-break"}
-            continue
-
         if local in {"h1", "h2", "h3", "h4", "h5", "h6"}:
             if document_role == "toc":
                 _replace_classes(element, "eo-toc-heading")
@@ -962,6 +940,23 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
             _replace_classes(element, _heading_role(local, source_classes, is_front_matter))
             after_boundary = True
             opening_epigraph = False
+            continue
+
+        existing_role = _existing_optimizer_block_role(source_classes)
+        if existing_role and local in {
+            "aside",
+            "blockquote",
+            "div",
+            "figcaption",
+            "figure",
+            "ol",
+            "p",
+            "section",
+            "ul",
+        }:
+            _replace_classes(element, existing_role)
+            after_boundary = _role_creates_boundary(existing_role)
+            opening_epigraph = existing_role in {"eo-extract", "eo-scene-break"}
             continue
 
         if local in {"ol", "ul"}:
@@ -1265,11 +1260,13 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
 
 
 def _heading_role(local: str, classes: set[str], is_front_matter: bool) -> str:
-    if "part" in classes:
+    if "eo-part" in classes or "part" in classes:
         return "eo-part"
-    if is_front_matter or classes & FRONT_MATTER_HINTS:
+    if "eo-front" in classes or is_front_matter or classes & FRONT_MATTER_HINTS:
         return "eo-front"
-    if any(cls.startswith("chapter") for cls in classes):
+    if "eo-section" in classes:
+        return "eo-section"
+    if "eo-chapter" in classes or any(cls.startswith("chapter") for cls in classes):
         return "eo-chapter"
     if "section" in classes or local not in {"h1"}:
         return "eo-section"
