@@ -46,6 +46,9 @@ const pipelineFailedCount = document.querySelector("#pipeline-failed-count");
 const pipelineFailedSize = document.querySelector("#pipeline-failed-size");
 const pipelineArchiveCount = document.querySelector("#pipeline-archive-count");
 const pipelineArchiveSize = document.querySelector("#pipeline-archive-size");
+const pipelineLastScan = document.querySelector("#pipeline-last-scan");
+const pipelineNextScan = document.querySelector("#pipeline-next-scan");
+const pipelineNextScanDetail = document.querySelector("#pipeline-next-scan-detail");
 const tabButtons = document.querySelectorAll(".tab-button");
 const tabPanels = document.querySelectorAll(".tab-panel");
 
@@ -835,19 +838,36 @@ function renderPipeline(pipeline) {
   renderPipelineCard(pipelineOutputCount, pipelineOutputSize, pipeline.output);
   renderPipelineCard(pipelineFailedCount, pipelineFailedSize, pipeline.failed);
   renderPipelineCard(pipelineArchiveCount, pipelineArchiveSize, pipeline.archive);
+  pipelineLastScan.textContent = pipeline.last_scan_at ? formatTimestamp(pipeline.last_scan_at) : "Never";
 
   if (typeof pipeline.seconds_until_next_scan === "number") {
     automationScanState.textContent = `Next scan in ${pipeline.seconds_until_next_scan}s`;
+    pipelineNextScan.textContent = `${pipeline.seconds_until_next_scan}s`;
+    pipelineNextScanDetail.textContent = pipeline.next_scan_at
+      ? formatTimestamp(pipeline.next_scan_at)
+      : "Scheduled";
   } else if (pipeline.last_scan_at) {
     automationScanState.textContent = "Watcher idle";
+    pipelineNextScan.textContent = "Idle";
+    pipelineNextScanDetail.textContent = "Disabled";
   } else {
     automationScanState.textContent = "No scans yet";
+    pipelineNextScan.textContent = "Idle";
+    pipelineNextScanDetail.textContent = "No schedule";
   }
 }
 
 function renderPipelineCard(countElement, sizeElement, value = {}) {
   countElement.textContent = String(value.count || 0);
   sizeElement.textContent = formatBytes(value.bytes || 0);
+}
+
+function formatTimestamp(timestampSeconds) {
+  return new Date(timestampSeconds * 1000).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
 }
 
 function createAutomationJob(job) {

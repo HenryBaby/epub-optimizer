@@ -54,6 +54,8 @@ def test_homepage_renders() -> None:
     assert 'id="automation-clear-history"' in response.text
     assert 'id="automation-profile"' in response.text
     assert 'id="pipeline-watch-count"' in response.text
+    assert 'id="pipeline-last-scan"' in response.text
+    assert 'id="pipeline-next-scan"' in response.text
     assert 'id="automation-scan-state"' in response.text
     assert 'src="/static/app.js?v=1.1.6"' in response.text
 
