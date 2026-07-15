@@ -159,6 +159,7 @@ def optimize_epub(
     output_filename: str | None = None,
     max_size_bytes: int | None = None,
     progress: Callable[[str], None] | None = None,
+    preserve_publisher_css: bool = False,
 ) -> OptimizationResult:
     started = time.perf_counter()
     log: list[str] = []
@@ -192,8 +193,16 @@ def optimize_epub(
             raise InvalidEpubError("OPF package document is missing a manifest.")
 
         items = _manifest_items(manifest)
-        removable_hrefs = _removable_manifest_hrefs(items)
-        stylesheet_class_roles = _stylesheet_class_roles(work_dir, package_dir, removable_hrefs)
+        removable_hrefs = _removable_manifest_hrefs(
+            items,
+            preserve_publisher_css=preserve_publisher_css,
+        )
+        stylesheet_role_hrefs = _stylesheet_manifest_hrefs(items)
+        stylesheet_class_roles = _stylesheet_class_roles(
+            work_dir,
+            package_dir,
+            stylesheet_role_hrefs,
+        )
         content_items = [
             item
             for item in items
@@ -211,6 +220,7 @@ def optimize_epub(
             manifest,
             removable_hrefs,
             canonical_item_href,
+            preserve_publisher_css=preserve_publisher_css,
         )
         removed_files = _delete_package_files(work_dir, package_dir, removable_hrefs)
         _append_log(
@@ -236,6 +246,7 @@ def optimize_epub(
                 work_dir,
                 _document_role(item),
                 stylesheet_class_roles,
+                preserve_publisher_css=preserve_publisher_css,
             ):
                 processed_docs += 1
 
@@ -277,6 +288,7 @@ def preview_epub_changes(
     input_path: Path,
     *,
     max_size_bytes: int | None = None,
+    preserve_publisher_css: bool = False,
 ) -> OptimizationPreview:
     input_path = input_path.resolve()
     validate_epub_archive(input_path, max_size_bytes=max_size_bytes)
@@ -297,7 +309,10 @@ def preview_epub_changes(
             raise InvalidEpubError("OPF package document is missing a manifest.")
 
         items = _manifest_items(manifest)
-        removable_hrefs = _removable_manifest_hrefs(items)
+        removable_hrefs = _removable_manifest_hrefs(
+            items,
+            preserve_publisher_css=preserve_publisher_css,
+        )
         content_items = [
             item
             for item in items
@@ -542,7 +557,11 @@ def _relative_from_package_dir(package_dir: str, package_relative_path: str) -> 
     return posixpath.relpath(package_relative_path, package_dir)
 
 
-def _removable_manifest_hrefs(items: list[etree._Element]) -> list[str]:
+def _removable_manifest_hrefs(
+    items: list[etree._Element],
+    *,
+    preserve_publisher_css: bool = False,
+) -> list[str]:
     hrefs: list[str] = []
     for item in items:
         href = item.attrib.get("href")
@@ -552,6 +571,8 @@ def _removable_manifest_hrefs(items: list[etree._Element]) -> list[str]:
             continue
         media_type = item.attrib.get("media-type", "").lower()
         suffix = PurePosixPath(href).suffix.lower()
+        if preserve_publisher_css and (media_type == "text/css" or suffix == ".css"):
+            continue
         if (
             media_type == "text/css"
             or media_type in REMOVABLE_MEDIA_TYPES
@@ -561,10 +582,25 @@ def _removable_manifest_hrefs(items: list[etree._Element]) -> list[str]:
     return hrefs
 
 
+def _stylesheet_manifest_hrefs(items: list[etree._Element]) -> list[str]:
+    hrefs: list[str] = []
+    for item in items:
+        href = item.attrib.get("href")
+        if not href:
+            continue
+        media_type = item.attrib.get("media-type", "").lower()
+        suffix = PurePosixPath(href).suffix.lower()
+        if media_type == "text/css" or suffix == ".css":
+            hrefs.append(href)
+    return hrefs
+
+
 def _replace_removable_manifest_items(
     manifest: etree._Element,
     removable_hrefs: list[str],
     canonical_href: str,
+    *,
+    preserve_publisher_css: bool = False,
 ) -> int:
     replaced = 0
     canonical_exists = False
@@ -572,11 +608,14 @@ def _replace_removable_manifest_items(
         href = item.attrib.get("href")
         media_type = item.attrib.get("media-type", "").lower()
         suffix = PurePosixPath(href or "").suffix.lower()
+        is_publisher_css = media_type == "text/css" or suffix == ".css"
         if item.attrib.get("id") == CANONICAL_CSS_ID or href == CANONICAL_CSS_HREF:
             item.attrib["id"] = CANONICAL_CSS_ID
             item.attrib["href"] = canonical_href
             item.attrib["media-type"] = "text/css"
             canonical_exists = True
+            continue
+        if preserve_publisher_css and is_publisher_css:
             continue
         if (
             media_type == "text/css"
@@ -657,6 +696,8 @@ def _process_content_document(
     work_dir: Path,
     document_role: str,
     stylesheet_class_roles: dict[str, str],
+    *,
+    preserve_publisher_css: bool = False,
 ) -> bool:
     parser = etree.XMLParser(resolve_entities=False, no_network=True, recover=True)
     tree = etree.parse(str(content_file), parser)
@@ -664,7 +705,7 @@ def _process_content_document(
 
     head = _first_xpath(root, "//*[local-name()='head']")
     if head is not None:
-        _remove_stylesheet_links(head)
+        _remove_stylesheet_links(head, preserve_publisher_css=preserve_publisher_css)
         css_href = make_relative_href(content_package_path, canonical_css_package_href)
         _append_stylesheet_link(head, css_href)
 
@@ -760,15 +801,30 @@ def _first_xpath(root: etree._Element, query: str) -> etree._Element | None:
     return matches[0] if matches else None
 
 
-def _remove_stylesheet_links(head: etree._Element) -> None:
+def _remove_stylesheet_links(
+    head: etree._Element,
+    *,
+    preserve_publisher_css: bool = False,
+) -> None:
     for link in list(head.xpath("./*[local-name()='link']")):
         rel = link.attrib.get("rel", "").lower()
         link_type = link.attrib.get("type", "").lower()
-        if "stylesheet" in rel or rel == "xpgt" or "page-template" in link_type:
+        href = link.attrib.get("href", "")
+        is_canonical = href.endswith(CANONICAL_CSS_HREF) or href.endswith("epub-optimizer.css")
+        if is_canonical:
+            head.remove(link)
+            continue
+        if rel == "xpgt" or "page-template" in link_type:
+            head.remove(link)
+            continue
+        if "stylesheet" in rel and not preserve_publisher_css:
             head.remove(link)
 
 
 def _append_stylesheet_link(head: etree._Element, href: str) -> None:
+    for link in head.xpath("./*[local-name()='link']"):
+        if link.attrib.get("href") == href and "stylesheet" in link.attrib.get("rel", "").lower():
+            return
     tag = _namespaced_tag(head, "link")
     link = etree.Element(tag)
     link.attrib["href"] = href

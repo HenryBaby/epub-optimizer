@@ -86,6 +86,29 @@ def test_preview_epub_changes_does_not_write_output(tmp_path: Path) -> None:
     assert not (tmp_path / "book-optimized.epub").exists()
 
 
+def test_optimize_can_preserve_publisher_css(tmp_path: Path) -> None:
+    source = tmp_path / "book.epub"
+    _write_minimal_epub(source)
+
+    preview = preview_epub_changes(source, preserve_publisher_css=True)
+    result = optimize_epub(source, tmp_path / "out-preserve-css", preserve_publisher_css=True)
+
+    assert preview.stylesheets_and_fonts == 2
+    assert result.stylesheets_replaced == 2
+    with zipfile.ZipFile(result.output_path) as archive:
+        names = archive.namelist()
+        opf = archive.read("OEBPS/content.opf").decode("utf-8")
+        chapter = archive.read("OEBPS/Text/chapter.xhtml").decode("utf-8")
+
+    assert "OEBPS/Styles/old.css" in names
+    assert "OEBPS/Fonts/publisher.woff2" not in names
+    assert "OEBPS/Misc/page-template.xpgt" not in names
+    assert "old.css" in opf
+    assert "publisher.woff2" not in opf
+    assert "../Styles/old.css" in chapter
+    assert "../Styles/epub-optimizer.css" in chapter
+
+
 def test_optimize_writes_deterministic_epub_archives(tmp_path: Path) -> None:
     source = tmp_path / "book.epub"
     _write_minimal_epub(source)
