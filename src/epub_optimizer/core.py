@@ -5,6 +5,7 @@ import re
 import tempfile
 import time
 from collections.abc import Callable
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path, PurePosixPath
 from urllib.parse import unquote, urlsplit
 
@@ -31,6 +32,7 @@ XHTML_NS = "http://www.w3.org/1999/xhtml"
 DANGEROUS_URI_SCHEMES = {"javascript", "data", "vbscript", "file"}
 CANONICAL_CSS_ID = "epub-optimizer-css"
 CANONICAL_CSS_HREF = "Styles/epub-optimizer.css"
+OPTIMIZER_META_NAME = "epub-optimizer:version"
 REMOVABLE_MEDIA_TYPES = {
     "application/font-woff",
     "application/font-woff2",
@@ -242,6 +244,7 @@ def optimize_epub(
             _append_log(log, f"Normalized {normalized_nav} navigation document(s).", progress)
 
         _append_log(log, f"Processed {processed_docs} content document(s).", progress)
+        _ensure_optimizer_marker(package_root)
         _write_xml(package_tree, package_file)
         write_epub(work_dir, output_path)
         _append_log(log, "Repackaged optimized EPUB.", progress)
@@ -441,6 +444,41 @@ def _find_child(parent: etree._Element, local_name: str) -> etree._Element | Non
     if found is not None:
         return found
     return parent.find(local_name)
+
+
+def _ensure_optimizer_marker(package_root: etree._Element) -> None:
+    metadata = _find_child(package_root, "metadata")
+    if metadata is None:
+        metadata = etree.Element(_qualified_like(package_root, "metadata"))
+        package_root.insert(0, metadata)
+
+    for child in metadata:
+        if not isinstance(child.tag, str) or etree.QName(child).localname != "meta":
+            continue
+        if child.attrib.get("name") == OPTIMIZER_META_NAME:
+            child.attrib["content"] = _optimizer_version()
+            return
+
+    metadata.append(
+        etree.Element(
+            _qualified_like(metadata, "meta"),
+            attrib={"name": OPTIMIZER_META_NAME, "content": _optimizer_version()},
+        )
+    )
+
+
+def _qualified_like(element: etree._Element, local_name: str) -> str:
+    namespace = etree.QName(element).namespace
+    if namespace:
+        return f"{{{namespace}}}{local_name}"
+    return local_name
+
+
+def _optimizer_version() -> str:
+    try:
+        return version("epub-optimizer")
+    except PackageNotFoundError:
+        return "unknown"
 
 
 def _manifest_items(manifest: etree._Element) -> list[etree._Element]:

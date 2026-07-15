@@ -27,6 +27,7 @@ def test_optimize_minimal_epub(tmp_path: Path) -> None:
     assert "OEBPS/Fonts/publisher.woff2" not in names
     assert "OEBPS/Misc/page-template.xpgt" not in names
     assert "epub-optimizer.css" in opf
+    assert 'name="epub-optimizer:version"' in opf
     assert "old.css" not in opf
     assert "publisher.woff2" not in opf
     assert "page-template.xpgt" not in opf
@@ -53,6 +54,7 @@ def test_optimize_minimal_epub(tmp_path: Path) -> None:
         second_chapter = archive.read("OEBPS/Text/chapter.xhtml").decode("utf-8")
 
     assert second_opf.count("epub-optimizer.css") == 1
+    assert second_opf.count('name="epub-optimizer:version"') == 1
     assert '<h1 class="eo-chapter">Chapter One</h1>' in second_chapter
     assert 'class="eo-first"' in second_chapter
     assert 'class="eo-body"' in second_chapter
