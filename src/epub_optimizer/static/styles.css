@@ -990,8 +990,79 @@ button:disabled {
   margin-top: 18px;
 }
 
+.analysis-item {
+  padding: 14px;
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--surface) 82%, transparent),
+      color-mix(in srgb, var(--surface-strong) 92%, transparent)
+    );
+}
+
+.analysis-item .result-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 0 0 14px;
+}
+
+.analysis-item .result-status {
+  flex: 0 0 auto;
+}
+
+.analysis-item h3 {
+  color: var(--text);
+  font-size: 14px;
+}
+
 .analysis-item .stats {
-  margin-top: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  margin: 0;
+}
+
+.analysis-item .stats div {
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--surface-strong) 72%, transparent),
+      color-mix(in srgb, var(--surface) 92%, transparent)
+    );
+}
+
+.analysis-section-heading {
+  margin: 18px 0 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.analysis-report {
+  gap: 6px;
+}
+
+.analysis-report li {
+  position: relative;
+  padding-left: 32px;
+}
+
+.analysis-report li::before {
+  position: absolute;
+  top: 9px;
+  left: 10px;
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--cyan) 58%, transparent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--cyan) 12%, transparent);
+  content: "";
+}
+
+.image-diagnostics li::before {
+  background: color-mix(in srgb, var(--green) 58%, transparent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--green) 12%, transparent);
 }
 
 .notice {

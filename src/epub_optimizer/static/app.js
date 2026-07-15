@@ -890,28 +890,39 @@ function createAnalysisItem(preview, report) {
   item.append(stats);
 
   if (preview.change_summary && preview.change_summary.length > 0) {
+    const heading = document.createElement("h4");
+    heading.className = "analysis-section-heading";
+    heading.textContent = "Planned optimization";
     const summary = document.createElement("ul");
-    summary.className = "change-report";
+    summary.className = "change-report analysis-report";
     for (const change of preview.change_summary) {
       const summaryItem = document.createElement("li");
       summaryItem.textContent = change;
       summary.append(summaryItem);
     }
+    item.append(heading);
     item.append(summary);
   }
 
   if (preview.image_diagnostics && preview.image_diagnostics.length > 0) {
+    const heading = document.createElement("h4");
+    heading.className = "analysis-section-heading";
+    heading.textContent = "Image resources";
     const diagnostics = document.createElement("ul");
-    diagnostics.className = "change-report";
+    diagnostics.className = "change-report analysis-report image-diagnostics";
     for (const diagnostic of preview.image_diagnostics) {
       const diagnosticItem = document.createElement("li");
       diagnosticItem.textContent = diagnostic;
       diagnostics.append(diagnosticItem);
     }
+    item.append(heading);
     item.append(diagnostics);
   }
 
   if (report && report.issues && report.issues.length > 0) {
+    const heading = document.createElement("h4");
+    heading.className = "analysis-section-heading";
+    heading.textContent = "Validation issues";
     const issues = document.createElement("ul");
     issues.className = "log warnings";
     for (const issue of report.issues) {
@@ -919,6 +930,7 @@ function createAnalysisItem(preview, report) {
       issueItem.textContent = `${issue.code}: ${issue.message}`;
       issues.append(issueItem);
     }
+    item.append(heading);
     item.append(issues);
   }
   return item;
