@@ -47,11 +47,14 @@ def test_homepage_renders() -> None:
     assert 'id="file-summary"' in response.text
     assert 'id="progress-meter"' in response.text
     assert 'id="download-all"' in response.text
+    assert 'id="clear-downloads"' in response.text
     assert 'data-tab="analyze"' in response.text
     assert 'id="analyze-button"' in response.text
     assert 'id="analysis-results"' in response.text
     assert 'id="automation-form"' in response.text
     assert 'id="automation-clear-history"' in response.text
+    assert 'id="automation-clear-archive"' in response.text
+    assert 'id="automation-clear-failed"' in response.text
     assert 'id="automation-profile"' in response.text
     assert 'id="automation-archive-retention-days"' in response.text
     assert 'id="automation-failed-retention-days"' in response.text
@@ -153,6 +156,39 @@ def test_failed_automation_file_can_be_reprocessed() -> None:
     assert response.json()["reprocessed"]["filename"] == "Retry.epub"
     assert not failed_source.exists()
     assert (manager.watch_dir / "Retry.epub").read_bytes() == b"epub"
+
+
+def test_retained_automation_files_can_be_cleared() -> None:
+    client = TestClient(app)
+    manager = app.state.automation_manager
+    manager._ensure_directories()
+    archived = manager.unprocessed_dir / "Archived.epub"
+    failed = manager.failed_dir / "Failed.epub"
+    archived.write_bytes(b"archive")
+    failed.write_bytes(b"failed")
+
+    archive_response = client.delete("/automation/retained/archive")
+    failed_response = client.delete("/automation/retained/failed")
+
+    assert archive_response.status_code == 200
+    assert failed_response.status_code == 200
+    assert not archived.exists()
+    assert not failed.exists()
+
+
+def test_manual_downloads_can_be_cleared(tmp_path) -> None:
+    output_dir = tmp_path / "epub-optimizer"
+    output_dir.mkdir()
+    (output_dir / "Book.epub").write_bytes(b"epub")
+    (output_dir / "Archive.zip").write_bytes(b"zip")
+    (output_dir / "Archive.zip.json").write_text("[]", encoding="utf-8")
+    client = TestClient(app)
+
+    response = client.delete("/downloads")
+
+    assert response.status_code == 200
+    assert response.json()["removed"] == 3
+    assert not any(output_dir.iterdir())
 
 
 def test_dry_run_reports_planned_changes() -> None:

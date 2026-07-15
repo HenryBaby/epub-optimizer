@@ -114,7 +114,10 @@
               <h2>Optimized EPUBs</h2>
               <p>Finished files are available until the app container is reset.</p>
             </div>
-            <a id="download-all" class="button secondary" href="#" hidden>Download all</a>
+            <div class="panel-actions">
+              <button id="clear-downloads" class="details-toggle" type="button">Clear downloads</button>
+              <a id="download-all" class="button secondary" href="#" hidden>Download all</a>
+            </div>
           </div>
           <div id="results-list" class="results-list"></div>
         </section>
@@ -264,6 +267,12 @@
               <span id="automation-summary">No jobs yet</span>
               <button id="automation-clear-history" class="details-toggle" type="button" disabled>
                 Clear
+              </button>
+              <button id="automation-clear-archive" class="details-toggle" type="button">
+                Clear archive
+              </button>
+              <button id="automation-clear-failed" class="details-toggle" type="button">
+                Clear failed
               </button>
             </div>
           </div>

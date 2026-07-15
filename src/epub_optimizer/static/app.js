@@ -14,6 +14,7 @@ const taskCount = document.querySelector("#log-count");
 const resultsPanel = document.querySelector("#results-panel");
 const resultsList = document.querySelector("#results-list");
 const downloadAll = document.querySelector("#download-all");
+const clearDownloads = document.querySelector("#clear-downloads");
 const fileSummary = document.querySelector("#file-summary");
 const themeToggle = document.querySelector("#theme-toggle");
 const analyzeButton = document.querySelector("#analyze-button");
@@ -40,6 +41,8 @@ const automationScanState = document.querySelector("#automation-scan-state");
 const automationSummary = document.querySelector("#automation-summary");
 const automationHistory = document.querySelector("#automation-history");
 const automationClearHistory = document.querySelector("#automation-clear-history");
+const automationClearArchive = document.querySelector("#automation-clear-archive");
+const automationClearFailed = document.querySelector("#automation-clear-failed");
 const pipelineWatchCount = document.querySelector("#pipeline-watch-count");
 const pipelineWatchSize = document.querySelector("#pipeline-watch-size");
 const pipelineOutputCount = document.querySelector("#pipeline-output-count");
@@ -250,6 +253,25 @@ automationClearHistory.addEventListener("click", async () => {
     return;
   }
   renderAutomation(await response.json());
+});
+
+automationClearArchive.addEventListener("click", () => {
+  clearAutomationRetainedFiles("archive", automationClearArchive);
+});
+
+automationClearFailed.addEventListener("click", () => {
+  clearAutomationRetainedFiles("failed", automationClearFailed);
+});
+
+clearDownloads.addEventListener("click", async () => {
+  clearDownloads.disabled = true;
+  const response = await fetch("/downloads", { method: "DELETE" });
+  if (response.ok) {
+    resultsList.replaceChildren();
+    resultsPanel.hidden = true;
+    downloadAll.hidden = true;
+  }
+  clearDownloads.disabled = false;
 });
 
 async function readEventStream(stream) {
@@ -697,6 +719,16 @@ async function loadAutomation() {
   } catch (_error) {
     automationPill.textContent = "Unavailable";
   }
+}
+
+async function clearAutomationRetainedFiles(kind, trigger) {
+  trigger.disabled = true;
+  const response = await fetch(`/automation/retained/${kind}`, { method: "DELETE" });
+  if (response.ok) {
+    const data = await response.json();
+    renderAutomation(data.status);
+  }
+  trigger.disabled = false;
 }
 
 function renderAutomation(status) {

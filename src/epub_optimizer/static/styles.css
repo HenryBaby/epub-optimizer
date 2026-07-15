@@ -301,6 +301,14 @@ button:focus-visible,
   text-align: right;
 }
 
+.panel-actions {
+  display: inline-flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
 .limit-badge,
 .status-pill {
   display: inline-flex;

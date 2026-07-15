@@ -115,6 +115,29 @@ async def reprocess_failed_job(request: Request) -> JSONResponse:
     return JSONResponse({"reprocessed": reprocessed, "status": _automation_manager().status()})
 
 
+@app.delete("/automation/retained/{kind}")
+async def clear_retained_automation_files(kind: str) -> JSONResponse:
+    try:
+        result = await _automation_manager().clear_retained_files(kind)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse({"cleanup": result, "status": _automation_manager().status()})
+
+
+@app.delete("/downloads")
+def clear_manual_downloads() -> JSONResponse:
+    output_dir = _persistent_output_dir()
+    removed = 0
+    for pattern in ("*.epub", "*.zip", "*.zip.json"):
+        for path in output_dir.glob(pattern):
+            if not path.is_file():
+                continue
+            with suppress(FileNotFoundError):
+                path.unlink()
+                removed += 1
+    return JSONResponse({"removed": removed})
+
+
 @app.post("/optimize")
 async def optimize(
     files: Annotated[list[UploadFile], File()],

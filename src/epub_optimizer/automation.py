@@ -159,6 +159,22 @@ class AutomationManager:
                 "watch_path": target_path.as_posix(),
             }
 
+    async def clear_retained_files(self, kind: str) -> dict[str, int]:
+        if kind not in {"archive", "failed"}:
+            raise ValueError("Unsupported retained file kind.")
+        async with self._lock:
+            removed = 0
+            for paths in self._profile_paths().values():
+                patterns = ["*.epub", "*.error.json"] if kind == "failed" else ["*.epub"]
+                for pattern in patterns:
+                    for path in paths[kind].glob(pattern):
+                        if not path.is_file():
+                            continue
+                        with suppress(FileNotFoundError):
+                            path.unlink()
+                            removed += 1
+            return {"removed": removed}
+
     def status(self) -> dict[str, Any]:
         now = time.time()
         paths = self._active_paths()
