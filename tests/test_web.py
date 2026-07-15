@@ -47,6 +47,9 @@ def test_homepage_renders() -> None:
     assert 'id="file-summary"' in response.text
     assert 'id="progress-meter"' in response.text
     assert 'id="download-all"' in response.text
+    assert 'data-tab="analyze"' in response.text
+    assert 'id="analyze-button"' in response.text
+    assert 'id="analysis-results"' in response.text
     assert 'id="automation-form"' in response.text
     assert 'id="automation-clear-history"' in response.text
     assert 'id="automation-profile"' in response.text

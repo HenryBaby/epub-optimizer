@@ -16,6 +16,8 @@ const resultsList = document.querySelector("#results-list");
 const downloadAll = document.querySelector("#download-all");
 const fileSummary = document.querySelector("#file-summary");
 const themeToggle = document.querySelector("#theme-toggle");
+const analyzeButton = document.querySelector("#analyze-button");
+const analysisResults = document.querySelector("#analysis-results");
 const automationForm = document.querySelector("#automation-form");
 const automationEnabled = document.querySelector("#automation-enabled");
 const automationAppendSuffix = document.querySelector("#automation-append-suffix");
@@ -174,6 +176,40 @@ form.addEventListener("submit", async (event) => {
     showTaskError(message);
   } finally {
     setBusy(false);
+  }
+});
+
+analyzeButton.addEventListener("click", async () => {
+  const files = selectedEpubFiles();
+  analysisResults.replaceChildren();
+  if (files.length === 0) {
+    analysisResults.append(createNotice("No EPUB files selected."));
+    return;
+  }
+
+  analyzeButton.disabled = true;
+  analyzeButton.textContent = "Analyzing...";
+  try {
+    const formData = new FormData();
+    for (const file of files) {
+      formData.append("files", file);
+    }
+    const [dryRunResponse, validationResponse] = await Promise.all([
+      fetch("/dry-run", { method: "POST", body: formData }),
+      fetch("/validate", { method: "POST", body: cloneFormData(formData) }),
+    ]);
+    if (!dryRunResponse.ok || !validationResponse.ok) {
+      throw new Error("Analysis request failed.");
+    }
+    const dryRun = await dryRunResponse.json();
+    const validation = await validationResponse.json();
+    renderAnalysis(dryRun.previews || [], validation.reports || []);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Analysis failed unexpectedly.";
+    analysisResults.append(createNotice(message));
+  } finally {
+    analyzeButton.disabled = false;
+    analyzeButton.textContent = "Analyze selected";
   }
 });
 
@@ -687,6 +723,76 @@ function renderAutomation(status) {
   for (const job of history) {
     automationHistory.append(createAutomationJob(job));
   }
+}
+
+function cloneFormData(formData) {
+  const clone = new FormData();
+  for (const [key, value] of formData.entries()) {
+    clone.append(key, value);
+  }
+  return clone;
+}
+
+function renderAnalysis(previews, reports) {
+  analysisResults.replaceChildren();
+  if (previews.length === 0) {
+    analysisResults.append(createNotice("No analyzable EPUB files found."));
+    return;
+  }
+  const reportByName = new Map(reports.map((report) => [report.filename, report]));
+  for (const preview of previews) {
+    analysisResults.append(createAnalysisItem(preview, reportByName.get(preview.filename)));
+  }
+}
+
+function createAnalysisItem(preview, report) {
+  const item = document.createElement("article");
+  item.className = `result-item analysis-item ${preview.status === "ok" ? "" : "automation-job-failed"}`;
+
+  const row = document.createElement("div");
+  row.className = "result-row";
+  const status = document.createElement("span");
+  status.className = "result-status";
+  status.textContent = preview.status === "ok" && report && report.valid ? "OK" : "!";
+  const title = document.createElement("h3");
+  title.textContent = preview.filename;
+  row.append(status, title);
+  item.append(row);
+
+  if (preview.status !== "ok") {
+    item.append(createNotice(preview.message || "Analysis failed."));
+    return item;
+  }
+
+  const stats = document.createElement("dl");
+  stats.className = "stats";
+  addStat(stats, "EPUB version", preview.epub_version || "Unknown");
+  addStat(stats, "Package", preview.package_path);
+  addStat(stats, "Documents", preview.content_documents);
+  addStat(stats, "Style/font items", preview.stylesheets_and_fonts);
+  addStat(stats, "Files removed", preview.removable_files);
+  addStat(stats, "Images", preview.images_preserved);
+  addStat(stats, "Validation", report && report.valid ? "Clean" : "Issues found");
+  item.append(stats);
+
+  if (report && report.issues && report.issues.length > 0) {
+    const issues = document.createElement("ul");
+    issues.className = "log warnings";
+    for (const issue of report.issues) {
+      const issueItem = document.createElement("li");
+      issueItem.textContent = `${issue.code}: ${issue.message}`;
+      issues.append(issueItem);
+    }
+    item.append(issues);
+  }
+  return item;
+}
+
+function createNotice(message) {
+  const notice = document.createElement("p");
+  notice.className = "notice";
+  notice.textContent = message;
+  return notice;
 }
 
 function renderAutomationProfiles(profiles, activeProfile) {

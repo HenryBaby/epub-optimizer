@@ -35,6 +35,9 @@
         <button class="tab-button tab-button-active" type="button" data-tab="optimizer" aria-selected="true">
           Optimizer
         </button>
+        <button class="tab-button" type="button" data-tab="analyze" aria-selected="false">
+          Analyze
+        </button>
         <button class="tab-button" type="button" data-tab="automation" aria-selected="false">
           Automation
         </button>
@@ -114,6 +117,19 @@
             <a id="download-all" class="button secondary" href="#" hidden>Download all</a>
           </div>
           <div id="results-list" class="results-list"></div>
+        </section>
+      </div>
+
+      <div class="tab-panel" data-tab-panel="analyze" hidden>
+        <section class="panel analysis-panel">
+          <div class="panel-heading">
+            <div>
+              <h2>Analyze EPUBs</h2>
+              <p>Inspect queued EPUB files without writing optimized output.</p>
+            </div>
+            <button id="analyze-button" type="button">Analyze selected</button>
+          </div>
+          <div id="analysis-results" class="results-list analysis-results"></div>
         </section>
       </div>
 

@@ -965,6 +965,19 @@ button:disabled {
   margin-top: 12px;
 }
 
+.analysis-results {
+  margin-top: 18px;
+}
+
+.analysis-item .stats {
+  margin-top: 12px;
+}
+
+.notice {
+  margin: 0;
+  color: var(--muted);
+}
+
 .automation-history-actions {
   display: inline-flex;
   gap: 10px;
