@@ -115,6 +115,30 @@ def test_automation_history_can_be_cleared() -> None:
     assert manager.history == []
 
 
+def test_dry_run_reports_planned_changes() -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/dry-run",
+        files={
+            "files": (
+                "Preview.epub",
+                _minimal_epub_bytes(),
+                "application/epub+zip",
+            )
+        },
+    )
+
+    assert response.status_code == 200
+    preview = response.json()["previews"][0]
+    assert preview["status"] == "ok"
+    assert preview["filename"] == "Preview.epub"
+    assert preview["epub_version"] == "3.0"
+    assert preview["content_documents"] == 1
+    assert preview["stylesheets_and_fonts"] == 0
+    assert preview["would_write_canonical_css"] is True
+
+
 def test_streaming_optimize_handles_url_significant_filename_chars() -> None:
     client = TestClient(app)
 

@@ -22,7 +22,7 @@ from starlette.background import BackgroundTask
 
 from epub_optimizer import __version__
 from epub_optimizer.automation import AutomationManager
-from epub_optimizer.core import optimize_epub, optimized_filename
+from epub_optimizer.core import optimize_epub, optimized_filename, preview_epub_changes
 from epub_optimizer.errors import EpubOptimizerError, failure_diagnostic
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -91,6 +91,61 @@ async def optimize(
         media_type="application/x-ndjson",
         headers={"Cache-Control": "no-store"},
     )
+
+
+@app.post("/dry-run")
+async def dry_run(files: Annotated[list[UploadFile], File()]) -> JSONResponse:
+    if not files:
+        raise HTTPException(status_code=400, detail="Please upload at least one EPUB file.")
+
+    previews = []
+    with tempfile.TemporaryDirectory(prefix="epub-optimizer-preview-web-") as temp_name:
+        temp_dir = Path(temp_name)
+        upload_dir = temp_dir / "uploads"
+        upload_dir.mkdir()
+        for index, file in enumerate(files, start=1):
+            original_name = Path(file.filename or "").name
+            if not original_name.lower().endswith(".epub"):
+                previews.append(
+                    {
+                        "filename": original_name or "Unknown file",
+                        "status": "failed",
+                        "message": "Please upload a file with the .epub extension.",
+                    }
+                )
+                continue
+
+            upload_path = upload_dir / f"{index}-{uuid.uuid4().hex}.epub"
+            try:
+                await _save_upload(file, upload_path)
+                preview = preview_epub_changes(upload_path, max_size_bytes=MAX_UPLOAD_BYTES)
+            except EpubOptimizerError as exc:
+                previews.append(
+                    {
+                        "filename": original_name,
+                        "status": "failed",
+                        "message": str(exc),
+                    }
+                )
+                continue
+            except Exception as exc:
+                LOGGER.exception("Unexpected dry-run failure for %s", original_name)
+                previews.append(
+                    {
+                        "filename": original_name,
+                        "status": "failed",
+                        "message": "Dry run failed unexpectedly.",
+                        "detail": f"{type(exc).__name__}: {exc}",
+                    }
+                )
+                continue
+
+            data = asdict(preview)
+            data["filename"] = original_name
+            data["status"] = "ok"
+            previews.append(data)
+
+    return JSONResponse({"previews": previews})
 
 
 @app.get("/download/{filename}")

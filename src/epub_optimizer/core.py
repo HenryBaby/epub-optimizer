@@ -18,7 +18,7 @@ from epub_optimizer.epub import (
     write_epub,
 )
 from epub_optimizer.errors import InvalidEpubError
-from epub_optimizer.models import OptimizationResult
+from epub_optimizer.models import OptimizationPreview, OptimizationResult
 from epub_optimizer.style import CANONICAL_CSS
 
 OPF_NS = "http://www.idpf.org/2007/opf"
@@ -259,6 +259,60 @@ def optimize_epub(
     )
 
 
+def preview_epub_changes(
+    input_path: Path,
+    *,
+    max_size_bytes: int | None = None,
+) -> OptimizationPreview:
+    input_path = input_path.resolve()
+    validate_epub_archive(input_path, max_size_bytes=max_size_bytes)
+
+    with tempfile.TemporaryDirectory(prefix="epub-optimizer-preview-") as temp_name:
+        work_dir = Path(temp_name)
+        extract_epub(input_path, work_dir)
+
+        package_path = find_package_document(work_dir)
+        package_file = work_dir / Path(*PurePosixPath(package_path).parts)
+        package_dir = posixpath.dirname(package_path)
+        package_tree = _parse_xml(package_file)
+        package_root = package_tree.getroot()
+        epub_version = package_root.attrib.get("version")
+
+        manifest = _find_child(package_root, "manifest")
+        if manifest is None:
+            raise InvalidEpubError("OPF package document is missing a manifest.")
+
+        items = _manifest_items(manifest)
+        removable_hrefs = _removable_manifest_hrefs(items)
+        content_items = [
+            item
+            for item in items
+            if item.attrib.get("media-type", "").lower()
+            in {"application/xhtml+xml", "text/html", "application/x-dtbook+xml"}
+            and item.attrib.get("href")
+        ]
+        image_count = sum(
+            1 for item in items if item.attrib.get("media-type", "").lower().startswith("image/")
+        )
+        warnings = []
+        for item in content_items:
+            href = item.attrib["href"]
+            if not _package_file_exists(work_dir, package_dir, href):
+                warnings.append(f"Manifest content document is missing: {href}")
+
+        return OptimizationPreview(
+            input_filename=input_path.name,
+            epub_version=epub_version,
+            package_path=package_path,
+            content_documents=len(content_items),
+            stylesheets_and_fonts=len(removable_hrefs),
+            removable_files=_existing_package_file_count(work_dir, package_dir, removable_hrefs),
+            images_preserved=image_count,
+            would_write_canonical_css=True,
+            warnings=warnings,
+        )
+
+
 def _append_log(
     log: list[str],
     message: str,
@@ -385,6 +439,22 @@ def _delete_package_files(work_dir: Path, package_dir: str, hrefs: list[str]) ->
             file_path.unlink()
             deleted += 1
     return deleted
+
+
+def _existing_package_file_count(work_dir: Path, package_dir: str, hrefs: list[str]) -> int:
+    count = 0
+    for href in hrefs:
+        package_path = _join_package_path(package_dir, href)
+        file_path = work_dir / Path(*PurePosixPath(package_path).parts)
+        if file_path.is_file():
+            count += 1
+    return count
+
+
+def _package_file_exists(work_dir: Path, package_dir: str, href: str) -> bool:
+    package_path = _join_package_path(package_dir, href)
+    file_path = work_dir / Path(*PurePosixPath(package_path).parts)
+    return file_path.is_file()
 
 
 def _stylesheet_class_roles(

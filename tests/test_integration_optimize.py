@@ -1,7 +1,7 @@
 import zipfile
 from pathlib import Path
 
-from epub_optimizer.core import optimize_epub
+from epub_optimizer.core import optimize_epub, preview_epub_changes
 
 
 def test_optimize_minimal_epub(tmp_path: Path) -> None:
@@ -57,6 +57,23 @@ def test_optimize_minimal_epub(tmp_path: Path) -> None:
     assert 'class="eo-first"' in second_chapter
     assert 'class="eo-body"' in second_chapter
     assert 'class="eo-strike"' in second_chapter
+
+
+def test_preview_epub_changes_does_not_write_output(tmp_path: Path) -> None:
+    source = tmp_path / "book.epub"
+    _write_minimal_epub(source)
+
+    preview = preview_epub_changes(source)
+
+    assert preview.input_filename == "book.epub"
+    assert preview.epub_version == "3.0"
+    assert preview.package_path == "OEBPS/content.opf"
+    assert preview.content_documents == 1
+    assert preview.stylesheets_and_fonts == 3
+    assert preview.removable_files == 3
+    assert preview.images_preserved == 0
+    assert preview.would_write_canonical_css is True
+    assert not (tmp_path / "book-optimized.epub").exists()
 
 
 def test_optimize_root_opf_anonymous_div_chapter(tmp_path: Path) -> None:
