@@ -94,6 +94,20 @@ def test_automation_status_and_configuration() -> None:
     }
 
 
+def test_health_endpoint_reports_service_status() -> None:
+    client = TestClient(app)
+
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "ok",
+        "version": "1.1.6",
+        "automation_running": False,
+        "automation_enabled": False,
+    }
+
+
 def test_automation_history_can_be_cleared() -> None:
     client = TestClient(app)
     manager = app.state.automation_manager

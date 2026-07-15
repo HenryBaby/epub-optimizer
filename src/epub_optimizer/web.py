@@ -71,6 +71,19 @@ def automation_status() -> JSONResponse:
     return JSONResponse(_automation_manager().status())
 
 
+@app.get("/health")
+def health() -> JSONResponse:
+    automation = _automation_manager().status()
+    return JSONResponse(
+        {
+            "status": "ok",
+            "version": __version__,
+            "automation_running": automation["running"],
+            "automation_enabled": automation["config"]["enabled"],
+        }
+    )
+
+
 @app.post("/automation")
 async def configure_automation(request: Request) -> JSONResponse:
     payload = await request.json()
