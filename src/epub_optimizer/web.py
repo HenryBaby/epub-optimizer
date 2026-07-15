@@ -22,7 +22,12 @@ from starlette.background import BackgroundTask
 
 from epub_optimizer import __version__
 from epub_optimizer.automation import AutomationManager
-from epub_optimizer.core import optimize_epub, optimized_filename, preview_epub_changes
+from epub_optimizer.core import (
+    optimize_epub,
+    optimized_filename,
+    preview_epub_changes,
+    validate_epub_details,
+)
 from epub_optimizer.errors import EpubOptimizerError, failure_diagnostic
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -146,6 +151,61 @@ async def dry_run(files: Annotated[list[UploadFile], File()]) -> JSONResponse:
             previews.append(data)
 
     return JSONResponse({"previews": previews})
+
+
+@app.post("/validate")
+async def validate(files: Annotated[list[UploadFile], File()]) -> JSONResponse:
+    if not files:
+        raise HTTPException(status_code=400, detail="Please upload at least one EPUB file.")
+
+    reports = []
+    with tempfile.TemporaryDirectory(prefix="epub-optimizer-validate-web-") as temp_name:
+        temp_dir = Path(temp_name)
+        upload_dir = temp_dir / "uploads"
+        upload_dir.mkdir()
+        for index, file in enumerate(files, start=1):
+            original_name = Path(file.filename or "").name
+            if not original_name.lower().endswith(".epub"):
+                reports.append(
+                    {
+                        "filename": original_name or "Unknown file",
+                        "valid": False,
+                        "issues": [
+                            {
+                                "severity": "error",
+                                "code": "invalid-extension",
+                                "message": "Please upload a file with the .epub extension.",
+                            }
+                        ],
+                    }
+                )
+                continue
+
+            upload_path = upload_dir / f"{index}-{uuid.uuid4().hex}.epub"
+            try:
+                await _save_upload(file, upload_path)
+                report = validate_epub_details(upload_path, max_size_bytes=MAX_UPLOAD_BYTES)
+            except EpubOptimizerError as exc:
+                reports.append(
+                    {
+                        "filename": original_name,
+                        "valid": False,
+                        "issues": [
+                            {
+                                "severity": "error",
+                                "code": "validation-failed",
+                                "message": str(exc),
+                            }
+                        ],
+                    }
+                )
+                continue
+
+            data = asdict(report)
+            data["filename"] = original_name
+            reports.append(data)
+
+    return JSONResponse({"reports": reports})
 
 
 @app.get("/download/{filename}")

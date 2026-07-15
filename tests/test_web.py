@@ -139,6 +139,27 @@ def test_dry_run_reports_planned_changes() -> None:
     assert preview["would_write_canonical_css"] is True
 
 
+def test_validate_reports_clean_epub() -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/validate",
+        files={
+            "files": (
+                "Valid.epub",
+                _minimal_epub_bytes(),
+                "application/epub+zip",
+            )
+        },
+    )
+
+    assert response.status_code == 200
+    report = response.json()["reports"][0]
+    assert report["filename"] == "Valid.epub"
+    assert report["valid"] is True
+    assert report["issues"] == []
+
+
 def test_streaming_optimize_handles_url_significant_filename_chars() -> None:
     client = TestClient(app)
 

@@ -18,7 +18,12 @@ from epub_optimizer.epub import (
     write_epub,
 )
 from epub_optimizer.errors import InvalidEpubError
-from epub_optimizer.models import OptimizationPreview, OptimizationResult
+from epub_optimizer.models import (
+    OptimizationPreview,
+    OptimizationResult,
+    ValidationIssue,
+    ValidationReport,
+)
 from epub_optimizer.style import CANONICAL_CSS
 
 OPF_NS = "http://www.idpf.org/2007/opf"
@@ -310,6 +315,88 @@ def preview_epub_changes(
             images_preserved=image_count,
             would_write_canonical_css=True,
             warnings=warnings,
+        )
+
+
+def validate_epub_details(
+    input_path: Path,
+    *,
+    max_size_bytes: int | None = None,
+) -> ValidationReport:
+    input_path = input_path.resolve()
+    validate_epub_archive(input_path, max_size_bytes=max_size_bytes)
+    issues: list[ValidationIssue] = []
+
+    with tempfile.TemporaryDirectory(prefix="epub-optimizer-validate-") as temp_name:
+        work_dir = Path(temp_name)
+        extract_epub(input_path, work_dir)
+
+        package_path = find_package_document(work_dir)
+        package_file = work_dir / Path(*PurePosixPath(package_path).parts)
+        package_dir = posixpath.dirname(package_path)
+        package_tree = _parse_xml(package_file)
+        package_root = package_tree.getroot()
+        epub_version = package_root.attrib.get("version")
+
+        manifest = _find_child(package_root, "manifest")
+        if manifest is None:
+            issues.append(
+                ValidationIssue(
+                    severity="error",
+                    code="missing-manifest",
+                    message="OPF package document is missing a manifest.",
+                )
+            )
+            return ValidationReport(
+                input_filename=input_path.name,
+                valid=False,
+                epub_version=epub_version,
+                package_path=package_path,
+                issues=issues,
+            )
+
+        items = _manifest_items(manifest)
+        item_ids = {item.attrib.get("id", "") for item in items}
+        for item in items:
+            href = item.attrib.get("href")
+            if href and not _package_file_exists(work_dir, package_dir, href):
+                issues.append(
+                    ValidationIssue(
+                        severity="error",
+                        code="missing-manifest-file",
+                        message=f"Manifest file is missing: {href}",
+                    )
+                )
+
+        spine = _find_child(package_root, "spine")
+        if spine is None:
+            issues.append(
+                ValidationIssue(
+                    severity="error",
+                    code="missing-spine",
+                    message="OPF package document is missing a spine.",
+                )
+            )
+        else:
+            for itemref in spine:
+                if not isinstance(itemref.tag, str) or etree.QName(itemref).localname != "itemref":
+                    continue
+                idref = itemref.attrib.get("idref", "")
+                if idref not in item_ids:
+                    issues.append(
+                        ValidationIssue(
+                            severity="error",
+                            code="missing-spine-target",
+                            message=f"Spine references missing manifest item: {idref}",
+                        )
+                    )
+
+        return ValidationReport(
+            input_filename=input_path.name,
+            valid=not any(issue.severity == "error" for issue in issues),
+            epub_version=epub_version,
+            package_path=package_path,
+            issues=issues,
         )
 
 

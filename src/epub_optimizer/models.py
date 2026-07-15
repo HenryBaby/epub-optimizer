@@ -28,3 +28,19 @@ class OptimizationPreview:
     images_preserved: int
     would_write_canonical_css: bool
     warnings: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class ValidationIssue:
+    severity: str
+    code: str
+    message: str
+
+
+@dataclass(frozen=True)
+class ValidationReport:
+    input_filename: str
+    valid: bool
+    epub_version: str | None
+    package_path: str | None
+    issues: list[ValidationIssue] = field(default_factory=list)

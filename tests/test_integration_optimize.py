@@ -1,7 +1,7 @@
 import zipfile
 from pathlib import Path
 
-from epub_optimizer.core import optimize_epub, preview_epub_changes
+from epub_optimizer.core import optimize_epub, preview_epub_changes, validate_epub_details
 
 
 def test_optimize_minimal_epub(tmp_path: Path) -> None:
@@ -74,6 +74,58 @@ def test_preview_epub_changes_does_not_write_output(tmp_path: Path) -> None:
     assert preview.images_preserved == 0
     assert preview.would_write_canonical_css is True
     assert not (tmp_path / "book-optimized.epub").exists()
+
+
+def test_validate_epub_details_reports_structure_issues(tmp_path: Path) -> None:
+    source = tmp_path / "broken-spine.epub"
+    with zipfile.ZipFile(source, "w") as archive:
+        archive.writestr(
+            "mimetype",
+            "application/epub+zip",
+            compress_type=zipfile.ZIP_STORED,
+        )
+        archive.writestr(
+            "META-INF/container.xml",
+            """<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>
+""",
+        )
+        archive.writestr(
+            "OEBPS/content.opf",
+            """<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="id" version="3.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="id">urn:test</dc:identifier>
+    <dc:title>Test</dc:title>
+    <dc:language>en</dc:language>
+  </metadata>
+  <manifest>
+    <item id="chapter" href="Text/chapter.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="missing"/>
+  </spine>
+</package>
+""",
+        )
+        archive.writestr(
+            "OEBPS/Text/chapter.xhtml",
+            """<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head><title>Test</title></head>
+  <body><p>Body.</p></body>
+</html>
+""",
+        )
+
+    report = validate_epub_details(source)
+
+    assert report.valid is False
+    assert any(issue.code == "missing-spine-target" for issue in report.issues)
 
 
 def test_optimize_root_opf_anonymous_div_chapter(tmp_path: Path) -> None:
