@@ -746,7 +746,32 @@ function createAutomationJob(job) {
   if (job.diagnostic) {
     item.append(createFailureDetails(job.diagnostic));
   }
+  if (job.status === "failed") {
+    item.append(createReprocessButton(job.filename));
+  }
   return item;
+}
+
+function createReprocessButton(filename) {
+  const button = document.createElement("button");
+  button.className = "details-toggle";
+  button.type = "button";
+  button.textContent = "Reprocess";
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    const response = await fetch("/automation/reprocess", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filename }),
+    });
+    if (!response.ok) {
+      button.textContent = "Unavailable";
+      return;
+    }
+    const data = await response.json();
+    renderAutomation(data.status);
+  });
+  return button;
 }
 
 function failureSummary(job) {

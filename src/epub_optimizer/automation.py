@@ -123,6 +123,22 @@ class AutomationManager:
             self.history = []
             self._write_json(self.history_path, [])
 
+    async def reprocess_failed(self, filename: str) -> dict[str, str]:
+        async with self._lock:
+            paths = self._active_paths()
+            safe_name = Path(filename).name
+            failed_path = paths["failed"] / safe_name
+            if not failed_path.is_file():
+                raise FileNotFoundError(safe_name)
+            target_path = _unique_path(paths["watch"], safe_name)
+            shutil.move(str(failed_path), target_path)
+            with suppress(FileNotFoundError):
+                _failure_report_path(failed_path).unlink()
+            return {
+                "filename": safe_name,
+                "watch_path": target_path.as_posix(),
+            }
+
     def status(self) -> dict[str, Any]:
         now = time.time()
         paths = self._active_paths()

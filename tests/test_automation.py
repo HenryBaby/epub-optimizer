@@ -1,3 +1,4 @@
+import asyncio
 import os
 import time
 from pathlib import Path
@@ -139,3 +140,26 @@ def test_automation_cleans_old_unprocessed_sources(tmp_path: Path) -> None:
 
     assert not old_source.exists()
     assert new_source.read_bytes() == b"new"
+
+
+def test_automation_reprocess_failed_moves_file_to_watch(tmp_path: Path) -> None:
+    manager = AutomationManager(
+        watch_dir=tmp_path / "watch",
+        output_dir=tmp_path / "output",
+        failed_dir=tmp_path / "failed",
+        unprocessed_dir=tmp_path / "unprocessed",
+        config_path=tmp_path / "automation-config.json",
+        history_path=tmp_path / "automation-history.json",
+    )
+    manager._ensure_directories()
+    failed_source = manager.failed_dir / "Retry.epub"
+    failed_report = manager.failed_dir / "Retry.epub.error.json"
+    failed_source.write_bytes(b"epub")
+    failed_report.write_text("{}", encoding="utf-8")
+
+    result = asyncio.run(manager.reprocess_failed("Retry.epub"))
+
+    assert result["filename"] == "Retry.epub"
+    assert not failed_source.exists()
+    assert not failed_report.exists()
+    assert (manager.watch_dir / "Retry.epub").read_bytes() == b"epub"

@@ -86,6 +86,21 @@ async def clear_automation_history() -> JSONResponse:
     return JSONResponse(_automation_manager().status())
 
 
+@app.post("/automation/reprocess")
+async def reprocess_failed_job(request: Request) -> JSONResponse:
+    payload = await request.json()
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Reprocess request must be an object.")
+    filename = str(payload.get("filename", ""))
+    if not filename:
+        raise HTTPException(status_code=400, detail="Reprocess request requires a filename.")
+    try:
+        reprocessed = await _automation_manager().reprocess_failed(filename)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Failed EPUB is no longer available.") from exc
+    return JSONResponse({"reprocessed": reprocessed, "status": _automation_manager().status()})
+
+
 @app.post("/optimize")
 async def optimize(
     files: Annotated[list[UploadFile], File()],

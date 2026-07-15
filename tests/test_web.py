@@ -115,6 +115,21 @@ def test_automation_history_can_be_cleared() -> None:
     assert manager.history == []
 
 
+def test_failed_automation_file_can_be_reprocessed() -> None:
+    client = TestClient(app)
+    manager = app.state.automation_manager
+    manager._ensure_directories()
+    failed_source = manager.failed_dir / "Retry.epub"
+    failed_source.write_bytes(b"epub")
+
+    response = client.post("/automation/reprocess", json={"filename": "Retry.epub"})
+
+    assert response.status_code == 200
+    assert response.json()["reprocessed"]["filename"] == "Retry.epub"
+    assert not failed_source.exists()
+    assert (manager.watch_dir / "Retry.epub").read_bytes() == b"epub"
+
+
 def test_dry_run_reports_planned_changes() -> None:
     client = TestClient(app)
 
