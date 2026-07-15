@@ -34,9 +34,9 @@ def test_homepage_renders() -> None:
 
     assert response.status_code == 200
     assert "EPUB Optimizer" in response.text
-    assert "v1.1.6" in response.text
-    assert 'href="/static/favicon.png?v=1.1.6"' in response.text
-    assert 'href="/static/styles.css?v=1.1.6"' in response.text
+    assert "v1.1.7" in response.text
+    assert 'href="/static/favicon.png?v=1.1.7"' in response.text
+    assert 'href="/static/styles.css?v=1.1.7"' in response.text
     assert 'id="optimizer-form"' in response.text
     assert 'name="files"' in response.text
     assert 'id="source-picker"' in response.text
@@ -63,7 +63,7 @@ def test_homepage_renders() -> None:
     assert 'id="pipeline-last-scan"' in response.text
     assert 'id="pipeline-next-scan"' in response.text
     assert 'id="automation-scan-state"' in response.text
-    assert 'src="/static/app.js?v=1.1.6"' in response.text
+    assert 'src="/static/app.js?v=1.1.7"' in response.text
 
 
 def test_automation_status_and_configuration() -> None:
@@ -117,7 +117,7 @@ def test_health_endpoint_reports_service_status() -> None:
     assert response.status_code == 200
     assert response.json() == {
         "status": "ok",
-        "version": "1.1.6",
+        "version": "1.1.7",
         "automation_running": False,
         "automation_enabled": False,
     }
