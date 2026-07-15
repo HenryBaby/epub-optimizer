@@ -940,8 +940,19 @@ function createFailureDetails(diagnostic) {
   addFailureDetail(list, "Internal path", diagnostic.internal_path);
   addFailureDetail(list, "Failed file", diagnostic.failed_path);
   addFailureDetail(list, "Report", diagnostic.report_path);
+  addFailureDetail(list, "Next action", failureAction(diagnostic));
   details.append(list);
   return details;
+}
+
+function failureAction(diagnostic) {
+  if (diagnostic.exception_type === "InvalidEpubError") {
+    return "Check EPUB structure, repair the source file, then reprocess it.";
+  }
+  if (diagnostic.failed_path) {
+    return "Inspect the failed file and error report, then use Reprocess when ready.";
+  }
+  return "Review the error detail and retry after correcting the source EPUB.";
 }
 
 function addFailureDetail(list, labelText, valueText) {

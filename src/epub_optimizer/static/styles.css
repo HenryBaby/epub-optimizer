@@ -1041,6 +1041,8 @@ button:disabled {
 }
 
 .failure-detail-list dd {
+  margin: 0;
+  color: var(--text);
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 12px;
 }
