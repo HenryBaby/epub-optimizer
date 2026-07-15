@@ -56,6 +56,11 @@ const pipelineNextScan = document.querySelector("#pipeline-next-scan");
 const pipelineNextScanDetail = document.querySelector("#pipeline-next-scan-detail");
 const tabButtons = document.querySelectorAll(".tab-button");
 const tabPanels = document.querySelectorAll(".tab-panel");
+const STORAGE_KEYS = {
+  theme: "epubOptimizerTheme",
+  tab: "epubOptimizerTab",
+  appendSuffix: "epubOptimizerAppendSuffix",
+};
 
 let queueTotal = 0;
 let queueCompleted = 0;
@@ -76,6 +81,7 @@ const taskRows = new Map();
 
 initializeTheme();
 initializeTabs();
+initializeManualPreferences();
 initializeTasks();
 updateFileSummary();
 loadAutomation();
@@ -92,6 +98,10 @@ for (const tabButton of tabButtons) {
 }
 
 fileInput.addEventListener("change", updateFileSummary);
+
+appendSuffix.addEventListener("change", () => {
+  localStorage.setItem(STORAGE_KEYS.appendSuffix, appendSuffix.checked ? "true" : "false");
+});
 
 for (const eventName of ["dragenter", "dragover"]) {
   dropzone.addEventListener(eventName, (event) => {
@@ -674,7 +684,7 @@ function formatBytes(bytes) {
 }
 
 function initializeTheme() {
-  const storedTheme = localStorage.getItem("epubOptimizerTheme");
+  const storedTheme = localStorage.getItem(STORAGE_KEYS.theme);
   const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
   setTheme(storedTheme || (prefersDark ? "dark" : "light"));
 }
@@ -682,12 +692,19 @@ function initializeTheme() {
 function setTheme(theme) {
   document.documentElement.dataset.theme = theme;
   themeToggle.checked = theme === "dark";
-  localStorage.setItem("epubOptimizerTheme", theme);
+  localStorage.setItem(STORAGE_KEYS.theme, theme);
 }
 
 function initializeTabs() {
-  const storedTab = localStorage.getItem("epubOptimizerTab");
+  const storedTab = localStorage.getItem(STORAGE_KEYS.tab);
   activateTab(storedTab || "optimizer");
+}
+
+function initializeManualPreferences() {
+  const storedAppendSuffix = localStorage.getItem(STORAGE_KEYS.appendSuffix);
+  if (storedAppendSuffix === "true" || storedAppendSuffix === "false") {
+    appendSuffix.checked = storedAppendSuffix === "true";
+  }
 }
 
 function activateTab(tabName) {
@@ -706,7 +723,7 @@ function activateTab(tabName) {
     panel.hidden = !isActive;
   }
 
-  localStorage.setItem("epubOptimizerTab", nextTab);
+  localStorage.setItem(STORAGE_KEYS.tab, nextTab);
 }
 
 async function loadAutomation() {
