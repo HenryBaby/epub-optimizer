@@ -23,6 +23,12 @@ DEFAULT_POLL_SECONDS = 10
 DEFAULT_STABLE_SECONDS = 15
 UNPROCESSED_RETENTION_SECONDS = 30 * 24 * 60 * 60
 MAX_HISTORY_ITEMS = 25
+DEFAULT_PROFILE = "default"
+AUTOMATION_PROFILES = {
+    "default": "Default",
+    "shelfmark": "Shelfmark",
+    "manual": "Manual staging",
+}
 
 LOGGER = logging.getLogger(__name__)
 
@@ -33,6 +39,7 @@ class AutomationConfig:
     append_suffix: bool = True
     poll_seconds: int = DEFAULT_POLL_SECONDS
     stable_seconds: int = DEFAULT_STABLE_SECONDS
+    profile: str = DEFAULT_PROFILE
 
 
 @dataclass(slots=True)
@@ -106,6 +113,7 @@ class AutomationManager:
                     maximum=3600,
                     fallback=self.config.stable_seconds,
                 ),
+                profile=_valid_profile(values.get("profile", self.config.profile)),
             )
             self._write_json(self.config_path, asdict(self.config))
             return self.config
@@ -117,6 +125,7 @@ class AutomationManager:
 
     def status(self) -> dict[str, Any]:
         now = time.time()
+        paths = self._active_paths()
         next_scan_at = (
             self.last_scan_at + self.config.poll_seconds
             if self.config.enabled and self.last_scan_at is not None
@@ -124,17 +133,20 @@ class AutomationManager:
         )
         return {
             "config": asdict(self.config),
+            "profiles": [
+                {"key": key, "label": label} for key, label in AUTOMATION_PROFILES.items()
+            ],
             "paths": {
-                "watch_dir": self.watch_dir.as_posix(),
-                "output_dir": self.output_dir.as_posix(),
-                "failed_dir": self.failed_dir.as_posix(),
-                "unprocessed_dir": self.unprocessed_dir.as_posix(),
+                "watch_dir": paths["watch"].as_posix(),
+                "output_dir": paths["output"].as_posix(),
+                "failed_dir": paths["failed"].as_posix(),
+                "unprocessed_dir": paths["archive"].as_posix(),
             },
             "pipeline": {
-                "watch": _directory_summary(self.watch_dir, "*.epub"),
-                "output": _directory_summary(self.output_dir, "*.epub"),
-                "failed": _directory_summary(self.failed_dir, "*.epub"),
-                "archive": _directory_summary(self.unprocessed_dir, "*.epub"),
+                "watch": _directory_summary(paths["watch"], "*.epub"),
+                "output": _directory_summary(paths["output"], "*.epub"),
+                "failed": _directory_summary(paths["failed"], "*.epub"),
+                "archive": _directory_summary(paths["archive"], "*.epub"),
                 "last_scan_at": self.last_scan_at,
                 "next_scan_at": next_scan_at,
                 "seconds_until_next_scan": (
@@ -168,7 +180,8 @@ class AutomationManager:
     def _scan_once(self) -> None:
         self._ensure_directories()
         self.last_scan_at = time.time()
-        for path in sorted(self.watch_dir.glob("*.epub")):
+        watch_dir = self._active_paths()["watch"]
+        for path in sorted(watch_dir.glob("*.epub")):
             if not path.is_file():
                 continue
             if self._is_stable(path):
@@ -191,6 +204,7 @@ class AutomationManager:
 
     def _process(self, path: Path) -> None:
         started = time.perf_counter()
+        paths = self._active_paths()
         self.current_job = AutomationJob(
             filename=path.name,
             status="running",
@@ -210,14 +224,14 @@ class AutomationManager:
                 if self.config.append_suffix
                 else _original_epub_name(path.name)
             )
-            target_name = _unique_name(self.output_dir, output_filename)
+            target_name = _unique_name(paths["output"], output_filename)
             result = optimize_epub(
                 path,
-                self.output_dir,
+                paths["output"],
                 output_filename=target_name,
                 progress=report,
             )
-            archived_source = _unique_path(self.unprocessed_dir, path.name)
+            archived_source = _unique_path(paths["archive"], path.name)
             shutil.move(str(path), archived_source)
             self._record(
                 AutomationJob(
@@ -231,7 +245,7 @@ class AutomationManager:
             )
         except Exception as exc:
             LOGGER.exception("Automation failed for %s", path)
-            failed_path = _unique_path(self.failed_dir, path.name)
+            failed_path = _unique_path(paths["failed"], path.name)
             with suppress(FileNotFoundError):
                 shutil.move(str(path), failed_path)
             message = _friendly_failure_message(exc)
@@ -268,17 +282,35 @@ class AutomationManager:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.failed_dir.mkdir(parents=True, exist_ok=True)
         self.unprocessed_dir.mkdir(parents=True, exist_ok=True)
+        for paths in self._profile_paths().values():
+            for directory in paths.values():
+                directory.mkdir(parents=True, exist_ok=True)
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
         self.history_path.parent.mkdir(parents=True, exist_ok=True)
 
     def _cleanup_unprocessed(self) -> None:
         cutoff = time.time() - self.unprocessed_retention_seconds
-        for path in self.unprocessed_dir.glob("*.epub"):
-            try:
-                if path.is_file() and path.stat().st_mtime < cutoff:
-                    path.unlink()
-            except OSError:
-                LOGGER.exception("Failed to clean archived source EPUB %s", path)
+        for paths in self._profile_paths().values():
+            for path in paths["archive"].glob("*.epub"):
+                try:
+                    if path.is_file() and path.stat().st_mtime < cutoff:
+                        path.unlink()
+                except OSError:
+                    LOGGER.exception("Failed to clean archived source EPUB %s", path)
+
+    def _active_paths(self) -> dict[str, Path]:
+        return self._profile_paths()[_valid_profile(self.config.profile)]
+
+    def _profile_paths(self) -> dict[str, dict[str, Path]]:
+        return {
+            key: {
+                "watch": _profile_directory(self.watch_dir, key),
+                "output": _profile_directory(self.output_dir, key),
+                "failed": _profile_directory(self.failed_dir, key),
+                "archive": _profile_directory(self.unprocessed_dir, key),
+            }
+            for key in AUTOMATION_PROFILES
+        }
 
     def _load_config(self) -> AutomationConfig:
         try:
@@ -300,6 +332,7 @@ class AutomationManager:
                 maximum=3600,
                 fallback=DEFAULT_STABLE_SECONDS,
             ),
+            profile=_valid_profile(data.get("profile", DEFAULT_PROFILE)),
         )
 
     def _load_history(self) -> list[AutomationJob]:
@@ -335,6 +368,15 @@ def _bounded_int(value: object, *, minimum: int, maximum: int, fallback: int) ->
     except (TypeError, ValueError):
         return fallback
     return min(max(parsed, minimum), maximum)
+
+
+def _valid_profile(value: object) -> str:
+    profile = str(value)
+    return profile if profile in AUTOMATION_PROFILES else DEFAULT_PROFILE
+
+
+def _profile_directory(directory: Path, profile: str) -> Path:
+    return directory if profile == DEFAULT_PROFILE else directory / profile
 
 
 def _original_epub_name(filename: str) -> str:

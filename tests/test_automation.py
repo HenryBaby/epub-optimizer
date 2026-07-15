@@ -79,6 +79,42 @@ def test_automation_moves_failed_epub_and_writes_report(monkeypatch, tmp_path: P
     assert manager.history[0].diagnostic.stage == "Resolving package document"
 
 
+def test_automation_profile_routes_to_profile_directories(monkeypatch, tmp_path: Path) -> None:
+    manager = AutomationManager(
+        watch_dir=tmp_path / "watch",
+        output_dir=tmp_path / "output",
+        failed_dir=tmp_path / "failed",
+        unprocessed_dir=tmp_path / "unprocessed",
+        config_path=tmp_path / "automation-config.json",
+        history_path=tmp_path / "automation-history.json",
+    )
+    manager.config.enabled = True
+    manager.config.profile = "shelfmark"
+    manager.config.stable_seconds = 3
+    manager._ensure_directories()
+
+    source = manager.watch_dir / "shelfmark" / "Profile.epub"
+    source.write_bytes(b"epub")
+    stat = source.stat()
+    manager._candidates[source] = (stat.st_size, stat.st_mtime, time.time() - 10)
+
+    def fake_optimize(input_path, output_dir, *, output_filename, progress):
+        assert input_path == source
+        assert output_dir == manager.output_dir / "shelfmark"
+        progress("Validated EPUB archive.")
+        output_path = output_dir / output_filename
+        output_path.write_bytes(b"optimized")
+        return SimpleNamespace(output_filename=output_filename)
+
+    monkeypatch.setattr("epub_optimizer.automation.optimize_epub", fake_optimize)
+
+    manager._scan_once()
+
+    assert not source.exists()
+    assert (manager.output_dir / "shelfmark" / "Profile-optimized.epub").is_file()
+    assert (manager.unprocessed_dir / "shelfmark" / "Profile.epub").read_bytes() == b"epub"
+
+
 def test_automation_cleans_old_unprocessed_sources(tmp_path: Path) -> None:
     manager = AutomationManager(
         watch_dir=tmp_path / "watch",

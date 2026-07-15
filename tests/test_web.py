@@ -49,6 +49,7 @@ def test_homepage_renders() -> None:
     assert 'id="download-all"' in response.text
     assert 'id="automation-form"' in response.text
     assert 'id="automation-clear-history"' in response.text
+    assert 'id="automation-profile"' in response.text
     assert 'id="pipeline-watch-count"' in response.text
     assert 'id="automation-scan-state"' in response.text
     assert 'src="/static/app.js?v=1.1.6"' in response.text
@@ -63,6 +64,8 @@ def test_automation_status_and_configuration() -> None:
     status = response.json()
     assert status["config"]["enabled"] is False
     assert status["config"]["append_suffix"] is True
+    assert status["config"]["profile"] == "default"
+    assert {"key": "shelfmark", "label": "Shelfmark"} in status["profiles"]
     assert status["paths"]["watch_dir"].endswith("watch")
     assert status["pipeline"]["watch"] == {"count": 0, "bytes": 0}
     assert status["pipeline"]["output"] == {"count": 0, "bytes": 0}
@@ -74,6 +77,7 @@ def test_automation_status_and_configuration() -> None:
         json={
             "enabled": True,
             "append_suffix": False,
+            "profile": "manual",
             "poll_seconds": 4,
             "stable_seconds": 5,
         },
@@ -84,6 +88,7 @@ def test_automation_status_and_configuration() -> None:
     assert updated == {
         "enabled": True,
         "append_suffix": False,
+        "profile": "manual",
         "poll_seconds": 4,
         "stable_seconds": 5,
     }
