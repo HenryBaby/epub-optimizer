@@ -476,6 +476,7 @@ function appendResult(event) {
   addStat(stats, "Stylesheets", event.stylesheets_replaced);
   addStat(stats, "Images", event.images_preserved);
   details.append(stats);
+  details.append(createChangeReport(event));
 
   if (event.warnings && event.warnings.length > 0) {
     const warnings = document.createElement("ul");
@@ -723,6 +724,23 @@ function renderAutomation(status) {
   for (const job of history) {
     automationHistory.append(createAutomationJob(job));
   }
+}
+
+function createChangeReport(event) {
+  const report = document.createElement("ul");
+  report.className = "change-report";
+  const changes = [
+    `Replaced ${event.stylesheets_replaced} stylesheet/font manifest item${event.stylesheets_replaced === 1 ? "" : "s"}.`,
+    `Normalized ${event.content_documents_processed} content document${event.content_documents_processed === 1 ? "" : "s"}.`,
+    `Preserved ${event.images_preserved} image resource${event.images_preserved === 1 ? "" : "s"}.`,
+    `Resolved package document: ${event.package_path}.`,
+  ];
+  for (const change of changes) {
+    const item = document.createElement("li");
+    item.textContent = change;
+    report.append(item);
+  }
+  return report;
 }
 
 function cloneFormData(formData) {

@@ -1107,6 +1107,23 @@ button:disabled {
   background: var(--surface);
 }
 
+.change-report {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.change-report li {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 10px;
+  background: color-mix(in srgb, var(--surface) 72%, transparent);
+  color: var(--muted);
+  font-size: 13px;
+}
+
 :root[data-theme="dark"] .stats div {
   background: color-mix(in srgb, var(--surface) 72%, var(--surface-strong));
 }
