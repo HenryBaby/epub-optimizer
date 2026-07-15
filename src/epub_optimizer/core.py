@@ -264,6 +264,15 @@ def optimize_epub(
         normalized_nav = _normalize_navigation_documents(work_dir, package_dir, items)
         if normalized_nav:
             _append_log(log, f"Normalized {normalized_nav} navigation document(s).", progress)
+        if _ensure_navigation_document(
+            package_root,
+            manifest,
+            work_dir,
+            package_dir,
+            package_dir_path,
+            content_items,
+        ):
+            _append_log(log, "Generated missing EPUB 3 navigation document.", progress)
 
         _append_log(log, f"Processed {processed_docs} content document(s).", progress)
         _ensure_optimizer_marker(package_root)
@@ -963,6 +972,114 @@ def _normalize_navigation_documents(
         if _normalize_ncx_document(nav_file, work_dir, posixpath.dirname(nav_package_path)):
             normalized += 1
     return normalized
+
+
+def _ensure_navigation_document(
+    package_root: etree._Element,
+    manifest: etree._Element,
+    work_dir: Path,
+    package_dir: str,
+    package_dir_path: Path,
+    content_items: list[etree._Element],
+) -> bool:
+    if not str(package_root.attrib.get("version", "")).startswith("3"):
+        return False
+    if any("nav" in item.attrib.get("properties", "").lower().split() for item in content_items):
+        return False
+
+    spine = _find_child(package_root, "spine")
+    if spine is None:
+        return False
+    items_by_id = {item.attrib.get("id", ""): item for item in content_items}
+    spine_items = [
+        items_by_id[itemref.attrib.get("idref", "")]
+        for itemref in spine
+        if isinstance(itemref.tag, str)
+        and etree.QName(itemref).localname == "itemref"
+        and itemref.attrib.get("idref", "") in items_by_id
+    ]
+    if not spine_items:
+        return False
+
+    nav_href = _available_nav_href(package_dir_path)
+    nav_package_path = _join_package_path(package_dir, nav_href)
+    nav_file = work_dir / Path(*PurePosixPath(nav_package_path).parts)
+    nav_file.write_text(
+        _navigation_document_markup(spine_items, work_dir, package_dir, nav_package_path),
+        encoding="utf-8",
+    )
+    manifest.append(
+        etree.Element(
+            f"{{{OPF_NS}}}item",
+            attrib={
+                "id": "epub-optimizer-nav",
+                "href": nav_href,
+                "media-type": "application/xhtml+xml",
+                "properties": "nav",
+            },
+        )
+    )
+    return True
+
+
+def _available_nav_href(package_dir_path: Path) -> str:
+    href = "nav.xhtml"
+    if not (package_dir_path / href).exists():
+        return href
+    return "epub-optimizer-nav.xhtml"
+
+
+def _navigation_document_markup(
+    spine_items: list[etree._Element],
+    work_dir: Path,
+    package_dir: str,
+    nav_package_path: str,
+) -> str:
+    entries = []
+    for index, item in enumerate(spine_items, start=1):
+        href = item.attrib["href"]
+        label = _nav_label_for_item(work_dir, package_dir, href, index)
+        target = make_relative_href(nav_package_path, _join_package_path(package_dir, href))
+        entries.append(f'      <li><a href="{_xml_escape(target)}">{_xml_escape(label)}</a></li>')
+    return (
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        '<html xmlns="http://www.w3.org/1999/xhtml" '
+        'xmlns:epub="http://www.idpf.org/2007/ops">\n'
+        "  <head><title>Contents</title></head>\n"
+        "  <body>\n"
+        '    <nav epub:type="toc" role="doc-toc">\n'
+        "      <h1>Contents</h1>\n"
+        "      <ol>\n"
+        + "\n".join(entries)
+        + "\n      </ol>\n"
+        "    </nav>\n"
+        "  </body>\n"
+        "</html>\n"
+    )
+
+
+def _nav_label_for_item(work_dir: Path, package_dir: str, href: str, index: int) -> str:
+    content_file = work_dir / Path(*PurePosixPath(_join_package_path(package_dir, href)).parts)
+    if not content_file.is_file():
+        return f"Section {index}"
+    parser = etree.XMLParser(resolve_entities=False, no_network=True, recover=True)
+    root = etree.parse(str(content_file), parser).getroot()
+    heading = _first_xpath(root, "//*[local-name()='h1' or local-name()='h2']")
+    if heading is not None and _normalized_text(heading):
+        return _normalized_text(heading)
+    title = _first_xpath(root, "//*[local-name()='title']")
+    if title is not None and _normalized_text(title):
+        return _normalized_text(title)
+    return f"Section {index}"
+
+
+def _xml_escape(value: str) -> str:
+    return (
+        value.replace("&", "&amp;")
+        .replace('"', "&quot;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
 
 
 def _normalize_ncx_document(nav_file: Path, work_dir: Path, nav_dir: str) -> bool:
