@@ -85,6 +85,19 @@ def test_preview_epub_changes_does_not_write_output(tmp_path: Path) -> None:
     assert not (tmp_path / "book-optimized.epub").exists()
 
 
+def test_optimize_writes_deterministic_epub_archives(tmp_path: Path) -> None:
+    source = tmp_path / "book.epub"
+    _write_minimal_epub(source)
+
+    first = optimize_epub(source, tmp_path / "first")
+    second = optimize_epub(source, tmp_path / "second")
+
+    assert first.output_path.read_bytes() == second.output_path.read_bytes()
+    with zipfile.ZipFile(first.output_path) as archive:
+        assert {info.date_time for info in archive.infolist()} == {(1980, 1, 1, 0, 0, 0)}
+        assert {info.external_attr for info in archive.infolist()} == {0o644 << 16}
+
+
 def test_validate_epub_details_reports_structure_issues(tmp_path: Path) -> None:
     source = tmp_path / "broken-spine.epub"
     with zipfile.ZipFile(source, "w") as archive:

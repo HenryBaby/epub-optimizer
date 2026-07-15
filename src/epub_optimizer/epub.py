@@ -11,6 +11,8 @@ from epub_optimizer.errors import InvalidEpubError
 
 CONTAINER_PATH = "META-INF/container.xml"
 EPUB_MIMETYPE = b"application/epub+zip"
+DETERMINISTIC_ZIP_DATE = (1980, 1, 1, 0, 0, 0)
+REGULAR_FILE_EXTERNAL_ATTR = 0o644 << 16
 
 
 def validate_archive_entry_name(name: str) -> PurePosixPath:
@@ -105,10 +107,33 @@ def write_epub(source_dir: Path, output_path: Path) -> None:
         raise InvalidEpubError("Cannot write EPUB without a mimetype file.")
 
     with zipfile.ZipFile(output_path, "w") as archive:
-        archive.write(mimetype_path, "mimetype", compress_type=zipfile.ZIP_STORED)
+        _write_archive_file(
+            archive,
+            mimetype_path,
+            "mimetype",
+            compress_type=zipfile.ZIP_STORED,
+        )
         for path in sorted(source_dir.rglob("*")):
             if not path.is_file() or path == mimetype_path:
                 continue
             arcname = path.relative_to(source_dir).as_posix()
             validate_archive_entry_name(arcname)
-            archive.write(path, arcname, compress_type=zipfile.ZIP_DEFLATED)
+            _write_archive_file(
+                archive,
+                path,
+                arcname,
+                compress_type=zipfile.ZIP_DEFLATED,
+            )
+
+
+def _write_archive_file(
+    archive: zipfile.ZipFile,
+    source: Path,
+    arcname: str,
+    *,
+    compress_type: int,
+) -> None:
+    info = zipfile.ZipInfo(filename=arcname, date_time=DETERMINISTIC_ZIP_DATE)
+    info.compress_type = compress_type
+    info.external_attr = REGULAR_FILE_EXTERNAL_ATTR
+    archive.writestr(info, source.read_bytes())
