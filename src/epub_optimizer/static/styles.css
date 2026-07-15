@@ -266,8 +266,13 @@ button:focus-visible,
 .upload-panel,
 .progress-panel,
 .automation-panel,
+.analysis-panel,
 .result {
   padding: 22px;
+}
+
+.analysis-panel {
+  min-height: 220px;
 }
 
 .panel-heading {
@@ -1234,6 +1239,7 @@ dd {
   .upload-panel,
   .progress-panel,
   .automation-panel,
+  .analysis-panel,
   .result {
     padding: 16px;
   }
