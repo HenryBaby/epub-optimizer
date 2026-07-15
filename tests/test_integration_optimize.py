@@ -1,3 +1,4 @@
+import json
 import zipfile
 from pathlib import Path
 
@@ -24,6 +25,7 @@ def test_optimize_minimal_epub(tmp_path: Path) -> None:
         chapter = archive.read("OEBPS/Text/chapter.xhtml").decode("utf-8")
         css = archive.read("OEBPS/Styles/epub-optimizer.css").decode("utf-8")
         nav = archive.read("OEBPS/nav.xhtml").decode("utf-8")
+        change_manifest = json.loads(archive.read("META-INF/epub-optimizer-report.json"))
 
     assert "OEBPS/Styles/old.css" not in names
     assert "OEBPS/Fonts/publisher.woff2" not in names
@@ -35,6 +37,9 @@ def test_optimize_minimal_epub(tmp_path: Path) -> None:
     assert "page-template.xpgt" not in opf
     assert 'properties="nav"' in opf
     assert '<a href="Text/chapter.xhtml">Chapter One</a>' in nav
+    assert change_manifest["generated_by"] == "EPUB Optimizer"
+    assert change_manifest["content_documents_processed"] == 1
+    assert change_manifest["stylesheets_replaced"] == 3
     assert "../Styles/epub-optimizer.css" in chapter
     assert '<h1 class="eo-chapter">Chapter One</h1>' in chapter
     assert 'class="eo-right">Chapter One' not in chapter

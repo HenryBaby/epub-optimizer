@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import posixpath
 import re
 import tempfile
@@ -277,6 +278,22 @@ def optimize_epub(
         _append_log(log, f"Processed {processed_docs} content document(s).", progress)
         _ensure_optimizer_marker(package_root)
         _write_xml(package_tree, package_file)
+        _write_change_manifest(
+            work_dir,
+            {
+                "generated_by": "EPUB Optimizer",
+                "version": _optimizer_version(),
+                "input_filename": input_path.name,
+                "output_filename": output_filename,
+                "epub_version": epub_version,
+                "package_path": package_path,
+                "content_documents_processed": processed_docs,
+                "stylesheets_replaced": stylesheets_replaced,
+                "images_preserved": image_count,
+                "image_diagnostics": image_diagnostics,
+                "warnings": warnings,
+            },
+        )
         write_epub(work_dir, output_path)
         _append_log(log, "Repackaged optimized EPUB.", progress)
         output_report = validate_epub_details(output_path)
@@ -696,6 +713,15 @@ def _optimizer_version() -> str:
         return version("epub-optimizer")
     except PackageNotFoundError:
         return "unknown"
+
+
+def _write_change_manifest(work_dir: Path, data: dict[str, object]) -> None:
+    manifest_path = work_dir / "META-INF" / "epub-optimizer-report.json"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
 
 def _manifest_items(manifest: etree._Element) -> list[etree._Element]:
