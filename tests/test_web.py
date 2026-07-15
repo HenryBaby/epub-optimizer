@@ -224,6 +224,27 @@ def test_streaming_optimize_handles_url_significant_filename_chars() -> None:
     assert expired_download.status_code == 404
 
 
+def test_api_optimize_returns_epub_file() -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/optimize",
+        files={
+            "file": (
+                "Api Book.epub",
+                _minimal_epub_bytes(),
+                "application/epub+zip",
+            )
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/epub+zip"
+    assert "Api%20Book-optimized.epub" in response.headers["content-disposition"]
+    with zipfile.ZipFile(BytesIO(response.content)) as archive:
+        assert "epub-optimizer.css" in "".join(archive.namelist())
+
+
 def test_streaming_optimize_can_preserve_original_filename() -> None:
     client = TestClient(app)
 

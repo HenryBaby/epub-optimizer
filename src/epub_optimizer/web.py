@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import shutil
 import tempfile
 import uuid
 import zipfile
@@ -123,6 +124,47 @@ async def optimize(
         _optimization_events(files, append_suffix=append_suffix),
         media_type="application/x-ndjson",
         headers={"Cache-Control": "no-store"},
+    )
+
+
+@app.post("/api/optimize")
+async def api_optimize(
+    file: Annotated[UploadFile, File()],
+    append_suffix: Annotated[bool, Form()] = True,
+) -> FileResponse:
+    original_name = Path(file.filename or "").name
+    if not original_name.lower().endswith(".epub"):
+        raise HTTPException(
+            status_code=400,
+            detail="Please upload a file with the .epub extension.",
+        )
+
+    temp_dir = Path(tempfile.mkdtemp(prefix="epub-optimizer-api-"))
+    upload_path = temp_dir / "input.epub"
+    output_dir = temp_dir / "output"
+    output_dir.mkdir()
+    try:
+        await _save_upload(file, upload_path)
+        result = await asyncio.to_thread(
+            optimize_epub,
+            upload_path,
+            output_dir,
+            output_filename=_output_filename(original_name, append_suffix=append_suffix),
+            max_size_bytes=MAX_UPLOAD_BYTES,
+        )
+    except EpubOptimizerError as exc:
+        _remove_tree(temp_dir)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        LOGGER.exception("Unexpected API optimization failure for %s", original_name)
+        _remove_tree(temp_dir)
+        raise HTTPException(status_code=500, detail="Optimization failed unexpectedly.") from exc
+
+    return FileResponse(
+        result.output_path,
+        filename=result.output_filename,
+        media_type="application/epub+zip",
+        background=BackgroundTask(_remove_tree, temp_dir),
     )
 
 
@@ -589,6 +631,11 @@ def _remove_archive_downloads(path: Path) -> None:
             _remove_download(output_dir / Path(filename).name)
         manifest_path.unlink()
     _remove_download(path)
+
+
+def _remove_tree(path: Path) -> None:
+    with suppress(FileNotFoundError):
+        shutil.rmtree(path)
 
 
 def _archive_manifest_path(path: Path) -> Path:
