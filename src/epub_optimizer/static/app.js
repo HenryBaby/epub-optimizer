@@ -14,6 +14,7 @@ const taskCount = document.querySelector("#log-count");
 const resultsPanel = document.querySelector("#results-panel");
 const resultsList = document.querySelector("#results-list");
 const downloadAll = document.querySelector("#download-all");
+const exportReport = document.querySelector("#export-report");
 const clearDownloads = document.querySelector("#clear-downloads");
 const fileSummary = document.querySelector("#file-summary");
 const themeToggle = document.querySelector("#theme-toggle");
@@ -66,6 +67,7 @@ let queueTotal = 0;
 let queueCompleted = 0;
 let selectedFiles = [];
 let selectionMade = false;
+let currentRunReport = null;
 const TASKS = [
   { key: "start", label: "Preparing EPUB files", icon: "start" },
   { key: "validate", label: "Validating EPUB archives", icon: "validate" },
@@ -280,8 +282,20 @@ clearDownloads.addEventListener("click", async () => {
     resultsList.replaceChildren();
     resultsPanel.hidden = true;
     downloadAll.hidden = true;
+    exportReport.hidden = true;
+    currentRunReport = null;
   }
   clearDownloads.disabled = false;
+});
+
+exportReport.addEventListener("click", () => {
+  if (!currentRunReport) {
+    return;
+  }
+  downloadJson(
+    `epub-optimizer-report-${new Date().toISOString().replace(/[:.]/g, "-")}.json`,
+    currentRunReport,
+  );
 });
 
 async function readEventStream(stream) {
@@ -332,6 +346,7 @@ function handleEvent(event) {
     updateProgress();
     setStatus("Optimizing", `Finished ${event.filename}.`, "Active");
     updateTask("complete", event.index, event.total);
+    recordRunFile(event);
     appendResult(event);
     return;
   }
@@ -340,6 +355,7 @@ function handleEvent(event) {
     queueCompleted += 1;
     updateProgress();
     setStatus("Processing error", event.filename, "Error");
+    recordRunFailure(event);
     showTaskError(event.message, event);
     return;
   }
@@ -362,6 +378,7 @@ function handleEvent(event) {
       downloadAll.href = event.batch_download_url;
       downloadAll.hidden = false;
     }
+    finishRunReport(event);
   }
 }
 
@@ -553,7 +570,15 @@ function resetRun() {
   resultsList.replaceChildren();
   resultsPanel.hidden = true;
   downloadAll.hidden = true;
+  exportReport.hidden = true;
   downloadAll.removeAttribute("href");
+  currentRunReport = {
+    generated_by: "EPUB Optimizer",
+    started_at: new Date().toISOString(),
+    files: [],
+    failures: [],
+    summary: null,
+  };
   updateProgress();
 }
 
@@ -1023,4 +1048,62 @@ function addFailureDetail(list, labelText, valueText) {
   value.textContent = valueText;
   wrapper.append(label, value);
   list.append(wrapper);
+}
+
+function recordRunFile(event) {
+  if (!currentRunReport) {
+    return;
+  }
+  currentRunReport.files.push({
+    input_filename: event.filename,
+    output_filename: event.output_filename,
+    download_name: event.download_name,
+    epub_version: event.epub_version,
+    package_path: event.package_path,
+    elapsed_seconds: event.elapsed_seconds,
+    content_documents_processed: event.content_documents_processed,
+    stylesheets_replaced: event.stylesheets_replaced,
+    images_preserved: event.images_preserved,
+    warnings: event.warnings || [],
+  });
+}
+
+function recordRunFailure(event) {
+  if (!currentRunReport) {
+    return;
+  }
+  currentRunReport.failures.push({
+    input_filename: event.filename,
+    message: event.message,
+    stage: event.stage,
+    exception_type: event.exception_type,
+    detail: event.detail,
+    diagnostic: event.diagnostic || null,
+  });
+}
+
+function finishRunReport(event) {
+  if (!currentRunReport) {
+    return;
+  }
+  currentRunReport.finished_at = new Date().toISOString();
+  currentRunReport.summary = {
+    total: event.total,
+    successful: event.successful,
+    failed: event.failed,
+    batch_download_url: event.batch_download_url || null,
+  };
+  exportReport.hidden = false;
+}
+
+function downloadJson(filename, value) {
+  const blob = new Blob([JSON.stringify(value, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
