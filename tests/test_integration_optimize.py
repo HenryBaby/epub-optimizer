@@ -487,6 +487,19 @@ def test_optimize_preserves_svg_cover_sizing(tmp_path: Path) -> None:
     assert ".eo-image svg" in css
 
 
+def test_optimize_detects_plain_image_cover_page(tmp_path: Path) -> None:
+    source = tmp_path / "plain-cover.epub"
+    _write_plain_image_cover_epub(source)
+
+    result = optimize_epub(source, tmp_path / "out-plain-cover")
+
+    with zipfile.ZipFile(result.output_path) as archive:
+        cover = archive.read("OEBPS/xhtml/split000.xhtml").decode("utf-8")
+
+    assert '<div class="eo-title-page">' in cover
+    assert '<p class="eo-image"><img alt="Cover" src="../images/cover.png"/></p>' in cover
+
+
 def test_optimize_ignores_comment_nodes_inside_blocks(tmp_path: Path) -> None:
     source = tmp_path / "comment-nodes.epub"
     _write_comment_node_epub(source)
@@ -680,6 +693,64 @@ def _write_svg_cover_epub(path: Path) -> None:
 """,
         )
         archive.writestr("OEBPS/images/cover.jpg", b"fake-cover")
+
+
+def _write_plain_image_cover_epub(path: Path) -> None:
+    png_header = (
+        b"\x89PNG\r\n\x1a\n"
+        b"\x00\x00\x00\rIHDR"
+        b"\x00\x00\x02\x58\x00\x00\x03\x84"
+        b"\x08\x02\x00\x00\x00"
+    )
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr(
+            "mimetype",
+            "application/epub+zip",
+            compress_type=zipfile.ZIP_STORED,
+        )
+        archive.writestr(
+            "META-INF/container.xml",
+            """<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>
+""",
+        )
+        archive.writestr(
+            "content.opf",
+            """<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="id" version="3.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="id">urn:test-plain-cover</dc:identifier>
+    <dc:title>Plain Cover Test</dc:title>
+    <dc:language>en</dc:language>
+  </metadata>
+  <manifest>
+    <item id="page1" href="OEBPS/xhtml/split000.xhtml" media-type="application/xhtml+xml"/>
+    <item id="image1" href="OEBPS/images/cover.png" media-type="image/png"/>
+  </manifest>
+  <spine>
+    <itemref idref="page1"/>
+  </spine>
+</package>
+""",
+        )
+        archive.writestr(
+            "OEBPS/xhtml/split000.xhtml",
+            """<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head><title>Image</title></head>
+  <body>
+    <div>
+      <p><img alt="Cover" src="../images/cover.png"/></p>
+    </div>
+  </body>
+</html>
+""",
+        )
+        archive.writestr("OEBPS/images/cover.png", png_header)
 
 
 def _write_root_opf_div_chapter_epub(path: Path) -> None:

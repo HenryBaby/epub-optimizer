@@ -917,6 +917,8 @@ def _refine_document_role(root: etree._Element, document_role: str) -> str:
         return document_role
     if document_role == "metadata":
         return "metadata"
+    if _looks_like_cover_document(root):
+        return "title"
     if _looks_like_toc_document(root):
         return "toc"
     if _looks_like_dedication_document(root):
@@ -1025,6 +1027,20 @@ def _looks_like_metadata_page(root: etree._Element) -> bool:
             and any(token in combined for token in {"epub", "isbn", "copyright", "editor"})
         )
     )
+
+
+def _looks_like_cover_document(root: etree._Element) -> bool:
+    blocks = [
+        element
+        for element in root.xpath("//*[local-name()='body']//*[self::*]")
+        if etree.QName(element).localname.lower() in {"div", "figure", "p", "svg"}
+        and (_normalized_text(element) or _contains_descendant_image(element))
+    ]
+    if not blocks or len(blocks) > 4:
+        return False
+    image_blocks = [element for element in blocks if _contains_descendant_image(element)]
+    text = " ".join(_normalized_text(element) for element in blocks)
+    return bool(image_blocks) and len(image_blocks) == len(blocks) and len(text) <= 80
 
 
 def _looks_like_works_list_document(root: etree._Element) -> bool:
@@ -1973,6 +1989,12 @@ def _contains_direct_image(element: etree._Element) -> bool:
     return any(_local_name(child) in {"img", "svg"} for child in element)
 
 
+def _contains_descendant_image(element: etree._Element) -> bool:
+    return _contains_direct_image(element) or bool(
+        element.xpath(".//*[local-name()='img' or local-name()='svg' or local-name()='image']")
+    )
+
+
 def _is_direct_body_child(element: etree._Element) -> bool:
     parent = element.getparent()
     return parent is not None and etree.QName(parent).localname.lower() == "body"
@@ -2313,7 +2335,15 @@ def _document_role(item: etree._Element) -> str:
         ]
     ).lower()
     tokens = set(_identifier_tokens(values))
-    if tokens & {"titlepage", "title-page", "title_page"}:
+    if tokens & {
+        "cover",
+        "coverpage",
+        "cover-page",
+        "cover_page",
+        "titlepage",
+        "title-page",
+        "title_page",
+    }:
         return "title"
     if "title" in tokens and not (tokens & {"subtitle", "entitle"}):
         return "title"
