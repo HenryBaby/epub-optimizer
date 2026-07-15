@@ -142,6 +142,31 @@ def test_automation_cleans_old_unprocessed_sources(tmp_path: Path) -> None:
     assert new_source.read_bytes() == b"new"
 
 
+def test_automation_cleans_old_failed_sources_and_reports(tmp_path: Path) -> None:
+    manager = AutomationManager(
+        watch_dir=tmp_path / "watch",
+        output_dir=tmp_path / "output",
+        failed_dir=tmp_path / "failed",
+        unprocessed_dir=tmp_path / "unprocessed",
+        config_path=tmp_path / "automation-config.json",
+        history_path=tmp_path / "automation-history.json",
+        unprocessed_retention_seconds=60,
+    )
+    manager._ensure_directories()
+    failed_source = manager.failed_dir / "Old.epub"
+    failed_report = manager.failed_dir / "Old.epub.error.json"
+    failed_source.write_bytes(b"old")
+    failed_report.write_text("{}", encoding="utf-8")
+    old_time = time.time() - 120
+    os.utime(failed_source, (old_time, old_time))
+    os.utime(failed_report, (old_time, old_time))
+
+    manager._cleanup_retained_files()
+
+    assert not failed_source.exists()
+    assert not failed_report.exists()
+
+
 def test_automation_reprocess_failed_moves_file_to_watch(tmp_path: Path) -> None:
     manager = AutomationManager(
         watch_dir=tmp_path / "watch",

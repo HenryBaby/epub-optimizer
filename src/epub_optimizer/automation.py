@@ -22,7 +22,7 @@ AUTOMATION_CONFIG_PATH = Path("/data/automation-config.json")
 AUTOMATION_HISTORY_PATH = Path("/data/automation-history.json")
 DEFAULT_POLL_SECONDS = 10
 DEFAULT_STABLE_SECONDS = 15
-UNPROCESSED_RETENTION_SECONDS = 30 * 24 * 60 * 60
+DEFAULT_RETENTION_DAYS = 30
 MAX_HISTORY_ITEMS = 25
 DEFAULT_PROFILE = "default"
 AUTOMATION_PROFILES = {
@@ -41,6 +41,8 @@ class AutomationConfig:
     poll_seconds: int = DEFAULT_POLL_SECONDS
     stable_seconds: int = DEFAULT_STABLE_SECONDS
     profile: str = DEFAULT_PROFILE
+    archive_retention_days: int = DEFAULT_RETENTION_DAYS
+    failed_retention_days: int = DEFAULT_RETENTION_DAYS
 
 
 @dataclass(slots=True)
@@ -65,7 +67,7 @@ class AutomationManager:
         config_path: Path = AUTOMATION_CONFIG_PATH,
         history_path: Path = AUTOMATION_HISTORY_PATH,
         history_db_path: Path | None = None,
-        unprocessed_retention_seconds: int = UNPROCESSED_RETENTION_SECONDS,
+        unprocessed_retention_seconds: int | None = None,
     ) -> None:
         self.watch_dir = watch_dir
         self.output_dir = output_dir
@@ -117,6 +119,21 @@ class AutomationManager:
                     fallback=self.config.stable_seconds,
                 ),
                 profile=_valid_profile(values.get("profile", self.config.profile)),
+                archive_retention_days=_bounded_int(
+                    values.get(
+                        "archive_retention_days",
+                        self.config.archive_retention_days,
+                    ),
+                    minimum=1,
+                    maximum=3650,
+                    fallback=self.config.archive_retention_days,
+                ),
+                failed_retention_days=_bounded_int(
+                    values.get("failed_retention_days", self.config.failed_retention_days),
+                    minimum=1,
+                    maximum=3650,
+                    fallback=self.config.failed_retention_days,
+                ),
             )
             self._write_json(self.config_path, asdict(self.config))
             return self.config
@@ -181,7 +198,7 @@ class AutomationManager:
     async def _run(self) -> None:
         while not self._stop_event.is_set():
             try:
-                await asyncio.to_thread(self._cleanup_unprocessed)
+                await asyncio.to_thread(self._cleanup_retained_files)
                 if self.config.enabled:
                     await asyncio.to_thread(self._scan_once)
                 await asyncio.wait_for(
@@ -310,15 +327,31 @@ class AutomationManager:
         self.history_db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_history_db()
 
+    def _cleanup_retained_files(self) -> None:
+        archive_seconds = self._retention_seconds(self.config.archive_retention_days)
+        failed_seconds = self._retention_seconds(self.config.failed_retention_days)
+        self._cleanup_directory_files("archive", archive_seconds, "*.epub")
+        self._cleanup_directory_files("failed", failed_seconds, "*.epub")
+        self._cleanup_directory_files("failed", failed_seconds, "*.error.json")
+
     def _cleanup_unprocessed(self) -> None:
-        cutoff = time.time() - self.unprocessed_retention_seconds
+        archive_seconds = self._retention_seconds(self.config.archive_retention_days)
+        self._cleanup_directory_files("archive", archive_seconds, "*.epub")
+
+    def _cleanup_directory_files(self, key: str, retention_seconds: int, pattern: str) -> None:
+        cutoff = time.time() - retention_seconds
         for paths in self._profile_paths().values():
-            for path in paths["archive"].glob("*.epub"):
+            for path in paths[key].glob(pattern):
                 try:
                     if path.is_file() and path.stat().st_mtime < cutoff:
                         path.unlink()
                 except OSError:
                     LOGGER.exception("Failed to clean archived source EPUB %s", path)
+
+    def _retention_seconds(self, days: int) -> int:
+        if self.unprocessed_retention_seconds is not None:
+            return self.unprocessed_retention_seconds
+        return days * 24 * 60 * 60
 
     def _active_paths(self) -> dict[str, Path]:
         return self._profile_paths()[_valid_profile(self.config.profile)]
@@ -355,6 +388,18 @@ class AutomationManager:
                 fallback=DEFAULT_STABLE_SECONDS,
             ),
             profile=_valid_profile(data.get("profile", DEFAULT_PROFILE)),
+            archive_retention_days=_bounded_int(
+                data.get("archive_retention_days", DEFAULT_RETENTION_DAYS),
+                minimum=1,
+                maximum=3650,
+                fallback=DEFAULT_RETENTION_DAYS,
+            ),
+            failed_retention_days=_bounded_int(
+                data.get("failed_retention_days", DEFAULT_RETENTION_DAYS),
+                minimum=1,
+                maximum=3650,
+                fallback=DEFAULT_RETENTION_DAYS,
+            ),
         )
 
     def _load_history(self) -> list[AutomationJob]:

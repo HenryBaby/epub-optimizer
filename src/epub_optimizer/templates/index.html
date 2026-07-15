@@ -167,6 +167,14 @@
                 <span>File stability wait</span>
                 <input id="automation-stable-seconds" name="stable_seconds" type="number" min="3" max="3600" step="1">
               </label>
+              <label class="field-row" for="automation-archive-retention-days">
+                <span>Archive retention days</span>
+                <input id="automation-archive-retention-days" name="archive_retention_days" type="number" min="1" max="3650" step="1">
+              </label>
+              <label class="field-row" for="automation-failed-retention-days">
+                <span>Failed retention days</span>
+                <input id="automation-failed-retention-days" name="failed_retention_days" type="number" min="1" max="3650" step="1">
+              </label>
               <button id="automation-save" type="submit">Save automation</button>
             </form>
 

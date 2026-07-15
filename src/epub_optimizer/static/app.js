@@ -24,6 +24,8 @@ const automationAppendSuffix = document.querySelector("#automation-append-suffix
 const automationProfile = document.querySelector("#automation-profile");
 const automationPollSeconds = document.querySelector("#automation-poll-seconds");
 const automationStableSeconds = document.querySelector("#automation-stable-seconds");
+const automationArchiveRetentionDays = document.querySelector("#automation-archive-retention-days");
+const automationFailedRetentionDays = document.querySelector("#automation-failed-retention-days");
 const automationPill = document.querySelector("#automation-pill");
 const automationWatchDir = document.querySelector("#automation-watch-dir");
 const automationOutputDir = document.querySelector("#automation-output-dir");
@@ -224,6 +226,8 @@ automationForm.addEventListener("submit", async (event) => {
     profile: automationProfile.value,
     poll_seconds: Number.parseInt(automationPollSeconds.value, 10),
     stable_seconds: Number.parseInt(automationStableSeconds.value, 10),
+    archive_retention_days: Number.parseInt(automationArchiveRetentionDays.value, 10),
+    failed_retention_days: Number.parseInt(automationFailedRetentionDays.value, 10),
   };
   const response = await fetch("/automation", {
     method: "POST",
@@ -705,6 +709,8 @@ function renderAutomation(status) {
   automationProfile.value = config.profile || "default";
   automationPollSeconds.value = config.poll_seconds || 10;
   automationStableSeconds.value = config.stable_seconds || 15;
+  automationArchiveRetentionDays.value = config.archive_retention_days || 30;
+  automationFailedRetentionDays.value = config.failed_retention_days || 30;
   automationWatchDir.textContent = paths.watch_dir || "/watch";
   automationOutputDir.textContent = paths.output_dir || "/output";
   automationFailedDir.textContent = paths.failed_dir || "/failed";
@@ -714,7 +720,9 @@ function renderAutomation(status) {
   const history = status.history || [];
   const failedJobs = history.filter((job) => job.status === "failed");
   automationMode.textContent = config.enabled ? "Watching" : "Disabled";
-  automationCadence.textContent = `${config.poll_seconds || 10}s poll / ${config.stable_seconds || 15}s stable`;
+  automationCadence.textContent =
+    `${config.poll_seconds || 10}s poll / ${config.stable_seconds || 15}s stable` +
+    ` / ${config.archive_retention_days || 30}d archive`;
   automationRecentSuccess.textContent = String(history.filter((job) => job.status === "success").length);
   automationRecentFailed.textContent = String(failedJobs.length);
   automationLastFailure.textContent =

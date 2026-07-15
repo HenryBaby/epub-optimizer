@@ -53,6 +53,8 @@ def test_homepage_renders() -> None:
     assert 'id="automation-form"' in response.text
     assert 'id="automation-clear-history"' in response.text
     assert 'id="automation-profile"' in response.text
+    assert 'id="automation-archive-retention-days"' in response.text
+    assert 'id="automation-failed-retention-days"' in response.text
     assert 'id="pipeline-watch-count"' in response.text
     assert 'id="pipeline-last-scan"' in response.text
     assert 'id="pipeline-next-scan"' in response.text
@@ -85,6 +87,8 @@ def test_automation_status_and_configuration() -> None:
             "profile": "manual",
             "poll_seconds": 4,
             "stable_seconds": 5,
+            "archive_retention_days": 14,
+            "failed_retention_days": 7,
         },
     )
 
@@ -96,6 +100,8 @@ def test_automation_status_and_configuration() -> None:
         "profile": "manual",
         "poll_seconds": 4,
         "stable_seconds": 5,
+        "archive_retention_days": 14,
+        "failed_retention_days": 7,
     }
 
 
