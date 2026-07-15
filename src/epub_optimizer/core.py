@@ -248,6 +248,12 @@ def optimize_epub(
         _write_xml(package_tree, package_file)
         write_epub(work_dir, output_path)
         _append_log(log, "Repackaged optimized EPUB.", progress)
+        output_report = validate_epub_details(output_path)
+        _raise_for_validation_report(output_report)
+        warnings.extend(
+            issue.message for issue in output_report.issues if issue.severity != "error"
+        )
+        _append_log(log, "Validated optimized EPUB output.", progress)
 
     elapsed = time.perf_counter() - started
     _append_log(log, f"Finished in {elapsed:.2f} seconds.", progress)
@@ -434,6 +440,14 @@ def _preview_change_summary(
         f"Would preserve {images_preserved} image resource(s) without recompression.",
         "Would write the canonical EPUB Optimizer stylesheet.",
     ]
+
+
+def _raise_for_validation_report(report: ValidationReport) -> None:
+    errors = [issue for issue in report.issues if issue.severity == "error"]
+    if not errors:
+        return
+    detail = "; ".join(f"{issue.code}: {issue.message}" for issue in errors)
+    raise InvalidEpubError(f"Optimized EPUB failed validation: {detail}")
 
 
 def optimized_filename(filename: str) -> str:

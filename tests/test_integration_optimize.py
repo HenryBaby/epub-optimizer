@@ -14,6 +14,7 @@ def test_optimize_minimal_epub(tmp_path: Path) -> None:
     assert result.content_documents_processed == 1
     assert result.stylesheets_replaced == 3
     assert result.output_path.is_file()
+    assert "Validated optimized EPUB output." in result.log
 
     with zipfile.ZipFile(result.output_path) as archive:
         names = archive.namelist()
