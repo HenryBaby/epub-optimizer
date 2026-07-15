@@ -27,6 +27,7 @@ class OptimizationPreview:
     removable_files: int
     images_preserved: int
     would_write_canonical_css: bool
+    change_summary: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
 

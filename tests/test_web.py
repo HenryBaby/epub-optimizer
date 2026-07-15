@@ -214,6 +214,13 @@ def test_dry_run_reports_planned_changes() -> None:
     assert preview["content_documents"] == 1
     assert preview["stylesheets_and_fonts"] == 0
     assert preview["would_write_canonical_css"] is True
+    assert preview["change_summary"] == [
+        "Would normalize 1 content document(s).",
+        "Would replace 0 stylesheet/font manifest item(s).",
+        "Would delete 0 old style/font file(s).",
+        "Would preserve 0 image resource(s) without recompression.",
+        "Would write the canonical EPUB Optimizer stylesheet.",
+    ]
 
 
 def test_validate_reports_clean_epub() -> None:

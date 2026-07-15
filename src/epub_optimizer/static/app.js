@@ -878,6 +878,17 @@ function createAnalysisItem(preview, report) {
   addStat(stats, "Validation", report && report.valid ? "Clean" : "Issues found");
   item.append(stats);
 
+  if (preview.change_summary && preview.change_summary.length > 0) {
+    const summary = document.createElement("ul");
+    summary.className = "change-report";
+    for (const change of preview.change_summary) {
+      const summaryItem = document.createElement("li");
+      summaryItem.textContent = change;
+      summary.append(summaryItem);
+    }
+    item.append(summary);
+  }
+
   if (report && report.issues && report.issues.length > 0) {
     const issues = document.createElement("ul");
     issues.className = "log warnings";

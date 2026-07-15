@@ -75,6 +75,13 @@ def test_preview_epub_changes_does_not_write_output(tmp_path: Path) -> None:
     assert preview.removable_files == 3
     assert preview.images_preserved == 0
     assert preview.would_write_canonical_css is True
+    assert preview.change_summary == [
+        "Would normalize 1 content document(s).",
+        "Would replace 3 stylesheet/font manifest item(s).",
+        "Would delete 3 old style/font file(s).",
+        "Would preserve 0 image resource(s) without recompression.",
+        "Would write the canonical EPUB Optimizer stylesheet.",
+    ]
     assert not (tmp_path / "book-optimized.epub").exists()
 
 

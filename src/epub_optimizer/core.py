@@ -307,6 +307,7 @@ def preview_epub_changes(
             href = item.attrib["href"]
             if not _package_file_exists(work_dir, package_dir, href):
                 warnings.append(f"Manifest content document is missing: {href}")
+        removable_file_count = _existing_package_file_count(work_dir, package_dir, removable_hrefs)
 
         return OptimizationPreview(
             input_filename=input_path.name,
@@ -314,9 +315,15 @@ def preview_epub_changes(
             package_path=package_path,
             content_documents=len(content_items),
             stylesheets_and_fonts=len(removable_hrefs),
-            removable_files=_existing_package_file_count(work_dir, package_dir, removable_hrefs),
+            removable_files=removable_file_count,
             images_preserved=image_count,
             would_write_canonical_css=True,
+            change_summary=_preview_change_summary(
+                content_documents=len(content_items),
+                stylesheets_and_fonts=len(removable_hrefs),
+                removable_files=removable_file_count,
+                images_preserved=image_count,
+            ),
             warnings=warnings,
         )
 
@@ -411,6 +418,22 @@ def _append_log(
     log.append(message)
     if progress is not None:
         progress(message)
+
+
+def _preview_change_summary(
+    *,
+    content_documents: int,
+    stylesheets_and_fonts: int,
+    removable_files: int,
+    images_preserved: int,
+) -> list[str]:
+    return [
+        f"Would normalize {content_documents} content document(s).",
+        f"Would replace {stylesheets_and_fonts} stylesheet/font manifest item(s).",
+        f"Would delete {removable_files} old style/font file(s).",
+        f"Would preserve {images_preserved} image resource(s) without recompression.",
+        "Would write the canonical EPUB Optimizer stylesheet.",
+    ]
 
 
 def optimized_filename(filename: str) -> str:
