@@ -437,6 +437,7 @@ def validate_epub_details(
                     )
 
         issues.extend(_link_integrity_issues(work_dir, package_dir, items))
+        issues.extend(_duplicate_id_issues(work_dir, package_dir, items))
 
         return ValidationReport(
             input_filename=input_path.name,
@@ -577,6 +578,47 @@ def _anchor_issue(target_file: Path, fragment: str, href: str) -> ValidationIssu
 
 def _is_html_like_path(path: str) -> bool:
     return PurePosixPath(path).suffix.lower() in {".html", ".htm", ".xhtml"}
+
+
+def _duplicate_id_issues(
+    work_dir: Path,
+    package_dir: str,
+    items: list[etree._Element],
+) -> list[ValidationIssue]:
+    issues: list[ValidationIssue] = []
+    content_items = [
+        item
+        for item in items
+        if item.attrib.get("media-type", "").lower()
+        in {"application/xhtml+xml", "text/html", "application/x-dtbook+xml"}
+        and item.attrib.get("href")
+    ]
+    parser = etree.XMLParser(resolve_entities=False, no_network=True, recover=True)
+    for item in content_items:
+        href = item.attrib["href"]
+        content_package_path = _join_package_path(package_dir, href)
+        content_file = work_dir / Path(*PurePosixPath(content_package_path).parts)
+        if not content_file.is_file():
+            continue
+        root = etree.parse(str(content_file), parser).getroot()
+        seen: set[str] = set()
+        duplicates: set[str] = set()
+        for element in root.xpath("//*[@id]"):
+            element_id = element.attrib.get("id", "")
+            if not element_id:
+                continue
+            if element_id in seen:
+                duplicates.add(element_id)
+            seen.add(element_id)
+        for element_id in sorted(duplicates):
+            issues.append(
+                ValidationIssue(
+                    severity="warning",
+                    code="duplicate-id",
+                    message=f"Duplicate id '{element_id}' found in {href}.",
+                )
+            )
+    return issues
 
 
 def optimized_filename(filename: str) -> str:
@@ -891,6 +933,7 @@ def _process_content_document(
     _remove_broken_images(root, content_file, work_dir)
     _unwrap_font_elements(root)
     _normalize_inline_spans(root)
+    _repair_duplicate_ids(root)
     _collapse_nested_blockquotes(root)
     _remove_empty_blocks(root)
     document_role = _refine_document_role(root, document_role)
@@ -1378,6 +1421,43 @@ def _normalize_inline_spans(root: etree._Element) -> None:
             _replace_classes(span, "eo-smallcaps")
         else:
             span.attrib.pop("class", None)
+
+
+def _repair_duplicate_ids(root: etree._Element) -> None:
+    seen: set[str] = set()
+    counters: dict[str, int] = {}
+    replacements: dict[str, str] = {}
+    for element in root.xpath("//*[@id]"):
+        element_id = element.attrib.get("id", "")
+        if not element_id:
+            continue
+        if element_id not in seen:
+            seen.add(element_id)
+            continue
+        counters[element_id] = counters.get(element_id, 1) + 1
+        new_id = f"{element_id}-{counters[element_id]}"
+        while new_id in seen:
+            counters[element_id] += 1
+            new_id = f"{element_id}-{counters[element_id]}"
+        element.attrib["id"] = new_id
+        seen.add(new_id)
+        replacements.setdefault(element_id, new_id)
+
+    if replacements:
+        _update_same_document_fragment_links(root, replacements)
+
+
+def _update_same_document_fragment_links(
+    root: etree._Element,
+    replacements: dict[str, str],
+) -> None:
+    for element in root.xpath("//*[@href]"):
+        href = element.attrib.get("href", "")
+        if not href.startswith("#"):
+            continue
+        fragment = href[1:]
+        if fragment in replacements:
+            element.attrib["href"] = f"#{replacements[fragment]}"
 
 
 def _rename_element(element: etree._Element, local_name: str) -> None:
