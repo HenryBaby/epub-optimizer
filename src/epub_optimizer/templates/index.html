@@ -149,6 +149,28 @@
             </form>
 
             <div class="automation-overview">
+              <div class="pipeline-dashboard" aria-label="Automation pipeline status">
+                <div>
+                  <span>Waiting</span>
+                  <strong id="pipeline-watch-count">0</strong>
+                  <small id="pipeline-watch-size">0 KB</small>
+                </div>
+                <div>
+                  <span>Output</span>
+                  <strong id="pipeline-output-count">0</strong>
+                  <small id="pipeline-output-size">0 KB</small>
+                </div>
+                <div>
+                  <span>Failed</span>
+                  <strong id="pipeline-failed-count">0</strong>
+                  <small id="pipeline-failed-size">0 KB</small>
+                </div>
+                <div>
+                  <span>Archived</span>
+                  <strong id="pipeline-archive-count">0</strong>
+                  <small id="pipeline-archive-size">0 KB</small>
+                </div>
+              </div>
               <div class="automation-overview-grid">
                 <div>
                   <span>Mode</span>
@@ -170,6 +192,10 @@
               <div class="automation-last-failure">
                 <span>Last failure</span>
                 <strong id="automation-last-failure">None</strong>
+              </div>
+              <div class="automation-scan-state">
+                <span>Scan state</span>
+                <strong id="automation-scan-state">No scans yet</strong>
               </div>
               <dl class="automation-paths">
                 <div>

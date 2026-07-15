@@ -31,9 +31,18 @@ const automationCadence = document.querySelector("#automation-cadence");
 const automationRecentSuccess = document.querySelector("#automation-recent-success");
 const automationRecentFailed = document.querySelector("#automation-recent-failed");
 const automationLastFailure = document.querySelector("#automation-last-failure");
+const automationScanState = document.querySelector("#automation-scan-state");
 const automationSummary = document.querySelector("#automation-summary");
 const automationHistory = document.querySelector("#automation-history");
 const automationClearHistory = document.querySelector("#automation-clear-history");
+const pipelineWatchCount = document.querySelector("#pipeline-watch-count");
+const pipelineWatchSize = document.querySelector("#pipeline-watch-size");
+const pipelineOutputCount = document.querySelector("#pipeline-output-count");
+const pipelineOutputSize = document.querySelector("#pipeline-output-size");
+const pipelineFailedCount = document.querySelector("#pipeline-failed-count");
+const pipelineFailedSize = document.querySelector("#pipeline-failed-size");
+const pipelineArchiveCount = document.querySelector("#pipeline-archive-count");
+const pipelineArchiveSize = document.querySelector("#pipeline-archive-size");
 const tabButtons = document.querySelectorAll(".tab-button");
 const tabPanels = document.querySelectorAll(".tab-panel");
 
@@ -647,6 +656,7 @@ async function loadAutomation() {
 function renderAutomation(status) {
   const config = status.config || {};
   const paths = status.paths || {};
+  const pipeline = status.pipeline || {};
   automationEnabled.checked = Boolean(config.enabled);
   automationAppendSuffix.checked = config.append_suffix !== false;
   automationPollSeconds.value = config.poll_seconds || 10;
@@ -665,6 +675,7 @@ function renderAutomation(status) {
   automationRecentFailed.textContent = String(failedJobs.length);
   automationLastFailure.textContent =
     failedJobs.length === 0 ? "None" : failureSummary(failedJobs[0]);
+  renderPipeline(pipeline);
   automationSummary.textContent =
     history.length === 0 ? "No jobs yet" : `${history.length} recent job${history.length === 1 ? "" : "s"}`;
   automationClearHistory.disabled = history.length === 0;
@@ -672,6 +683,26 @@ function renderAutomation(status) {
   for (const job of history) {
     automationHistory.append(createAutomationJob(job));
   }
+}
+
+function renderPipeline(pipeline) {
+  renderPipelineCard(pipelineWatchCount, pipelineWatchSize, pipeline.watch);
+  renderPipelineCard(pipelineOutputCount, pipelineOutputSize, pipeline.output);
+  renderPipelineCard(pipelineFailedCount, pipelineFailedSize, pipeline.failed);
+  renderPipelineCard(pipelineArchiveCount, pipelineArchiveSize, pipeline.archive);
+
+  if (typeof pipeline.seconds_until_next_scan === "number") {
+    automationScanState.textContent = `Next scan in ${pipeline.seconds_until_next_scan}s`;
+  } else if (pipeline.last_scan_at) {
+    automationScanState.textContent = "Watcher idle";
+  } else {
+    automationScanState.textContent = "No scans yet";
+  }
+}
+
+function renderPipelineCard(countElement, sizeElement, value = {}) {
+  countElement.textContent = String(value.count || 0);
+  sizeElement.textContent = formatBytes(value.bytes || 0);
 }
 
 function createAutomationJob(job) {

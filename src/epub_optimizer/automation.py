@@ -116,6 +116,12 @@ class AutomationManager:
             self._write_json(self.history_path, [])
 
     def status(self) -> dict[str, Any]:
+        now = time.time()
+        next_scan_at = (
+            self.last_scan_at + self.config.poll_seconds
+            if self.config.enabled and self.last_scan_at is not None
+            else None
+        )
         return {
             "config": asdict(self.config),
             "paths": {
@@ -123,6 +129,17 @@ class AutomationManager:
                 "output_dir": self.output_dir.as_posix(),
                 "failed_dir": self.failed_dir.as_posix(),
                 "unprocessed_dir": self.unprocessed_dir.as_posix(),
+            },
+            "pipeline": {
+                "watch": _directory_summary(self.watch_dir, "*.epub"),
+                "output": _directory_summary(self.output_dir, "*.epub"),
+                "failed": _directory_summary(self.failed_dir, "*.epub"),
+                "archive": _directory_summary(self.unprocessed_dir, "*.epub"),
+                "last_scan_at": self.last_scan_at,
+                "next_scan_at": next_scan_at,
+                "seconds_until_next_scan": (
+                    max(0, round(next_scan_at - now)) if next_scan_at is not None else None
+                ),
             },
             "current_job": asdict(self.current_job) if self.current_job else None,
             "history": [asdict(job) for job in self.history],
@@ -405,3 +422,18 @@ def _stage_label_for_message(message: str) -> str:
 def _friendly_failure_message(exc: BaseException) -> str:
     message = str(exc)
     return message if message else "Optimization failed unexpectedly."
+
+
+def _directory_summary(directory: Path, pattern: str) -> dict[str, int]:
+    count = 0
+    total_bytes = 0
+    try:
+        paths = directory.glob(pattern)
+        for path in paths:
+            if not path.is_file():
+                continue
+            count += 1
+            total_bytes += path.stat().st_size
+    except OSError:
+        LOGGER.exception("Failed to summarize automation directory %s", directory)
+    return {"count": count, "bytes": total_bytes}

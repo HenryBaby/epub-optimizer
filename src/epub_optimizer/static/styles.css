@@ -342,6 +342,63 @@ form {
   gap: 14px;
 }
 
+.pipeline-dashboard {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.pipeline-dashboard div {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--surface-strong) 74%, transparent),
+    color-mix(in srgb, var(--surface) 90%, transparent)
+  );
+}
+
+.pipeline-dashboard span {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.pipeline-dashboard strong {
+  display: block;
+  color: var(--text);
+  font-size: 22px;
+  line-height: 1;
+}
+
+.pipeline-dashboard small {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.pipeline-dashboard div:nth-child(1) span {
+  color: var(--cyan);
+}
+
+.pipeline-dashboard div:nth-child(2) span {
+  color: var(--green);
+}
+
+.pipeline-dashboard div:nth-child(3) span {
+  color: var(--pink);
+}
+
+.pipeline-dashboard div:nth-child(4) span {
+  color: var(--magenta);
+}
+
 .automation-overview-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -349,7 +406,8 @@ form {
 }
 
 .automation-overview-grid div,
-.automation-last-failure {
+.automation-last-failure,
+.automation-scan-state {
   min-width: 0;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -358,7 +416,8 @@ form {
 }
 
 :root[data-theme="dark"] .automation-overview-grid div,
-:root[data-theme="dark"] .automation-last-failure {
+:root[data-theme="dark"] .automation-last-failure,
+:root[data-theme="dark"] .automation-scan-state {
   background: color-mix(in srgb, var(--surface) 72%, var(--surface-strong));
 }
 
@@ -402,6 +461,11 @@ form {
 .automation-last-failure span,
 :root[data-theme="dark"] .automation-last-failure span {
   color: var(--orange);
+}
+
+.automation-scan-state span,
+:root[data-theme="dark"] .automation-scan-state span {
+  color: var(--cyan);
 }
 
 .automation-paths {
