@@ -545,6 +545,17 @@ function appendResult(event) {
     details.append(warnings);
   }
 
+  if (event.image_diagnostics && event.image_diagnostics.length > 0) {
+    const diagnostics = document.createElement("ul");
+    diagnostics.className = "change-report";
+    for (const diagnostic of event.image_diagnostics) {
+      const diagnosticItem = document.createElement("li");
+      diagnosticItem.textContent = diagnostic;
+      diagnostics.append(diagnosticItem);
+    }
+    details.append(diagnostics);
+  }
+
   detailsToggle.addEventListener("click", () => {
     const isHidden = details.hidden;
     details.hidden = !isHidden;
@@ -889,6 +900,17 @@ function createAnalysisItem(preview, report) {
     item.append(summary);
   }
 
+  if (preview.image_diagnostics && preview.image_diagnostics.length > 0) {
+    const diagnostics = document.createElement("ul");
+    diagnostics.className = "change-report";
+    for (const diagnostic of preview.image_diagnostics) {
+      const diagnosticItem = document.createElement("li");
+      diagnosticItem.textContent = diagnostic;
+      diagnostics.append(diagnosticItem);
+    }
+    item.append(diagnostics);
+  }
+
   if (report && report.issues && report.issues.length > 0) {
     const issues = document.createElement("ul");
     issues.className = "log warnings";
@@ -1075,6 +1097,7 @@ function recordRunFile(event) {
     content_documents_processed: event.content_documents_processed,
     stylesheets_replaced: event.stylesheets_replaced,
     images_preserved: event.images_preserved,
+    image_diagnostics: event.image_diagnostics || [],
     warnings: event.warnings || [],
   });
 }

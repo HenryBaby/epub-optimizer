@@ -474,6 +474,7 @@ async def _optimization_events(
                     content_documents_processed=result.content_documents_processed,
                     stylesheets_replaced=result.stylesheets_replaced,
                     images_preserved=result.images_preserved,
+                    image_diagnostics=result.image_diagnostics,
                     warnings=result.warnings,
                 )
                 successful += 1

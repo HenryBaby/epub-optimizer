@@ -469,8 +469,11 @@ def test_optimize_preserves_svg_cover_sizing(tmp_path: Path) -> None:
     source = tmp_path / "svg-cover.epub"
     _write_svg_cover_epub(source)
 
+    preview = preview_epub_changes(source)
     result = optimize_epub(source, tmp_path / "out-svg-cover")
 
+    assert preview.image_diagnostics == ["images/cover.jpg (image/jpeg, 10 B)."]
+    assert result.image_diagnostics == ["images/cover.jpg (image/jpeg, 10 B)."]
     with zipfile.ZipFile(result.output_path) as archive:
         titlepage = archive.read("OEBPS/xhtml/titlepage.xhtml").decode("utf-8")
         css = archive.read("OEBPS/Styles/epub-optimizer.css").decode("utf-8")

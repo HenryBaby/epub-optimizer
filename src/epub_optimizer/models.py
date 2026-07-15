@@ -13,6 +13,7 @@ class OptimizationResult:
     content_documents_processed: int
     stylesheets_replaced: int
     images_preserved: int
+    image_diagnostics: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     log: list[str] = field(default_factory=list)
 
@@ -27,6 +28,7 @@ class OptimizationPreview:
     removable_files: int
     images_preserved: int
     would_write_canonical_css: bool
+    image_diagnostics: list[str] = field(default_factory=list)
     change_summary: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 

@@ -213,6 +213,7 @@ def optimize_epub(
         image_count = sum(
             1 for item in items if item.attrib.get("media-type", "").lower().startswith("image/")
         )
+        image_diagnostics = _image_diagnostics(work_dir, package_dir, items)
 
         canonical_css_package_href = _ensure_canonical_css(work_dir, package_dir_path)
         canonical_item_href = _relative_from_package_dir(package_dir, canonical_css_package_href)
@@ -279,6 +280,7 @@ def optimize_epub(
         content_documents_processed=processed_docs,
         stylesheets_replaced=stylesheets_replaced,
         images_preserved=image_count,
+        image_diagnostics=image_diagnostics,
         warnings=warnings,
         log=log,
     )
@@ -323,6 +325,7 @@ def preview_epub_changes(
         image_count = sum(
             1 for item in items if item.attrib.get("media-type", "").lower().startswith("image/")
         )
+        image_diagnostics = _image_diagnostics(work_dir, package_dir, items)
         warnings = []
         for item in content_items:
             href = item.attrib["href"]
@@ -339,6 +342,7 @@ def preview_epub_changes(
             removable_files=removable_file_count,
             images_preserved=image_count,
             would_write_canonical_css=True,
+            image_diagnostics=image_diagnostics,
             change_summary=_preview_change_summary(
                 content_documents=len(content_items),
                 stylesheets_and_fonts=len(removable_hrefs),
@@ -656,6 +660,68 @@ def _package_file_exists(work_dir: Path, package_dir: str, href: str) -> bool:
     package_path = _join_package_path(package_dir, href)
     file_path = work_dir / Path(*PurePosixPath(package_path).parts)
     return file_path.is_file()
+
+
+def _image_diagnostics(
+    work_dir: Path,
+    package_dir: str,
+    items: list[etree._Element],
+) -> list[str]:
+    diagnostics: list[str] = []
+    for item in items:
+        media_type = item.attrib.get("media-type", "").lower()
+        if not media_type.startswith("image/"):
+            continue
+        href = item.attrib.get("href", "")
+        if not href:
+            continue
+        package_path = _join_package_path(package_dir, href)
+        file_path = work_dir / Path(*PurePosixPath(package_path).parts)
+        if not file_path.is_file():
+            diagnostics.append(f"Image missing from manifest: {href}.")
+            continue
+        dimensions = _image_dimensions(file_path)
+        dimension_text = f", {dimensions[0]}x{dimensions[1]}" if dimensions else ""
+        diagnostics.append(
+            f"{href} ({media_type}, {_format_file_size(file_path.stat().st_size)}{dimension_text})."
+        )
+    return diagnostics
+
+
+def _image_dimensions(path: Path) -> tuple[int, int] | None:
+    data = path.read_bytes()[:4096]
+    if data.startswith(b"\x89PNG\r\n\x1a\n") and len(data) >= 24:
+        return int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big")
+    if data.startswith(b"\xff\xd8"):
+        return _jpeg_dimensions(data)
+    return None
+
+
+def _jpeg_dimensions(data: bytes) -> tuple[int, int] | None:
+    index = 2
+    while index + 9 < len(data):
+        if data[index] != 0xFF:
+            index += 1
+            continue
+        marker = data[index + 1]
+        if marker in {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB}:
+            return int.from_bytes(data[index + 7 : index + 9], "big"), int.from_bytes(
+                data[index + 5 : index + 7],
+                "big",
+            )
+        segment_length = int.from_bytes(data[index + 2 : index + 4], "big")
+        if segment_length < 2:
+            return None
+        index += 2 + segment_length
+    return None
+
+
+def _format_file_size(size: int) -> str:
+    if size < 1024:
+        return f"{size} B"
+    if size < 1024 * 1024:
+        return f"{size / 1024:.1f} KB"
+    return f"{size / (1024 * 1024):.1f} MB"
 
 
 def _stylesheet_class_roles(
