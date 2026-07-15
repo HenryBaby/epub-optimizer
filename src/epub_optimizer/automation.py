@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import shutil
+import sqlite3
 import time
 from contextlib import suppress
 from dataclasses import asdict, dataclass
@@ -63,6 +64,7 @@ class AutomationManager:
         unprocessed_dir: Path = UNPROCESSED_DIR,
         config_path: Path = AUTOMATION_CONFIG_PATH,
         history_path: Path = AUTOMATION_HISTORY_PATH,
+        history_db_path: Path | None = None,
         unprocessed_retention_seconds: int = UNPROCESSED_RETENTION_SECONDS,
     ) -> None:
         self.watch_dir = watch_dir
@@ -71,6 +73,7 @@ class AutomationManager:
         self.unprocessed_dir = unprocessed_dir
         self.config_path = config_path
         self.history_path = history_path
+        self.history_db_path = history_db_path or history_path.with_suffix(".sqlite")
         self.unprocessed_retention_seconds = unprocessed_retention_seconds
         self.config = self._load_config()
         self.history = self._load_history()
@@ -121,7 +124,7 @@ class AutomationManager:
     async def clear_history(self) -> None:
         async with self._lock:
             self.history = []
-            self._write_json(self.history_path, [])
+            self._clear_history_db()
 
     async def reprocess_failed(self, filename: str) -> dict[str, str]:
         async with self._lock:
@@ -291,7 +294,8 @@ class AutomationManager:
     def _record(self, job: AutomationJob) -> None:
         self.history.insert(0, job)
         self.history = self.history[:MAX_HISTORY_ITEMS]
-        self._write_json(self.history_path, [asdict(item) for item in self.history])
+        self._write_history_job(job)
+        self.history = self._load_history()
 
     def _ensure_directories(self) -> None:
         self.watch_dir.mkdir(parents=True, exist_ok=True)
@@ -303,6 +307,8 @@ class AutomationManager:
                 directory.mkdir(parents=True, exist_ok=True)
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
         self.history_path.parent.mkdir(parents=True, exist_ok=True)
+        self.history_db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._init_history_db()
 
     def _cleanup_unprocessed(self) -> None:
         cutoff = time.time() - self.unprocessed_retention_seconds
@@ -352,30 +358,102 @@ class AutomationManager:
         )
 
     def _load_history(self) -> list[AutomationJob]:
+        if self.history_db_path.is_file():
+            return self._load_history_db()
         try:
             data = json.loads(self.history_path.read_text(encoding="utf-8"))
         except (FileNotFoundError, json.JSONDecodeError):
             return []
-        jobs = []
-        for item in data[:MAX_HISTORY_ITEMS]:
-            if isinstance(item, dict):
-                jobs.append(
-                    AutomationJob(
-                        filename=str(item.get("filename", "")),
-                        status=str(item.get("status", "unknown")),
-                        message=str(item.get("message", "")),
-                        output_filename=item.get("output_filename"),
-                        elapsed_seconds=item.get("elapsed_seconds"),
-                        updated_at=float(item.get("updated_at", time.time())),
-                        diagnostic=_load_diagnostic(item.get("diagnostic")),
-                    )
-                )
+        jobs = _history_jobs_from_payloads(data[:MAX_HISTORY_ITEMS])
+        if jobs:
+            self._init_history_db()
+            for job in reversed(jobs):
+                self._write_history_job(job)
         return jobs
+
+    def _load_history_db(self) -> list[AutomationJob]:
+        self._init_history_db()
+        with sqlite3.connect(self.history_db_path) as connection:
+            rows = connection.execute(
+                """
+                SELECT payload
+                FROM jobs
+                ORDER BY updated_at DESC, id DESC
+                LIMIT ?
+                """,
+                (MAX_HISTORY_ITEMS,),
+            ).fetchall()
+        payloads = []
+        for row in rows:
+            try:
+                payloads.append(json.loads(row[0]))
+            except json.JSONDecodeError:
+                LOGGER.exception("Failed to decode automation history row.")
+        return _history_jobs_from_payloads(payloads)
+
+    def _write_history_job(self, job: AutomationJob) -> None:
+        self._init_history_db()
+        with sqlite3.connect(self.history_db_path) as connection:
+            connection.execute(
+                "INSERT INTO jobs (updated_at, payload) VALUES (?, ?)",
+                (job.updated_at, json.dumps(asdict(job), ensure_ascii=False)),
+            )
+            connection.execute(
+                """
+                DELETE FROM jobs
+                WHERE id NOT IN (
+                    SELECT id
+                    FROM jobs
+                    ORDER BY updated_at DESC, id DESC
+                    LIMIT ?
+                )
+                """,
+                (MAX_HISTORY_ITEMS,),
+            )
+            connection.commit()
+
+    def _clear_history_db(self) -> None:
+        self._init_history_db()
+        with sqlite3.connect(self.history_db_path) as connection:
+            connection.execute("DELETE FROM jobs")
+            connection.commit()
+
+    def _init_history_db(self) -> None:
+        self.history_db_path.parent.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(self.history_db_path) as connection:
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS jobs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    updated_at REAL NOT NULL,
+                    payload TEXT NOT NULL
+                )
+                """
+            )
+            connection.commit()
 
     @staticmethod
     def _write_json(path: Path, data: object) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _history_jobs_from_payloads(data: list[object]) -> list[AutomationJob]:
+    jobs = []
+    for item in data:
+        if isinstance(item, dict):
+            jobs.append(
+                AutomationJob(
+                    filename=str(item.get("filename", "")),
+                    status=str(item.get("status", "unknown")),
+                    message=str(item.get("message", "")),
+                    output_filename=item.get("output_filename"),
+                    elapsed_seconds=item.get("elapsed_seconds"),
+                    updated_at=float(item.get("updated_at", time.time())),
+                    diagnostic=_load_diagnostic(item.get("diagnostic")),
+                )
+            )
+    return jobs
 
 
 def _bounded_int(value: object, *, minimum: int, maximum: int, fallback: int) -> int:
