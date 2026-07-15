@@ -436,6 +436,8 @@ def validate_epub_details(
                         )
                     )
 
+        issues.extend(_link_integrity_issues(work_dir, package_dir, items))
+
         return ValidationReport(
             input_filename=input_path.name,
             valid=not any(issue.severity == "error" for issue in issues),
@@ -477,6 +479,104 @@ def _raise_for_validation_report(report: ValidationReport) -> None:
         return
     detail = "; ".join(f"{issue.code}: {issue.message}" for issue in errors)
     raise InvalidEpubError(f"Optimized EPUB failed validation: {detail}")
+
+
+def _link_integrity_issues(
+    work_dir: Path,
+    package_dir: str,
+    items: list[etree._Element],
+) -> list[ValidationIssue]:
+    issues: list[ValidationIssue] = []
+    content_items = [
+        item
+        for item in items
+        if item.attrib.get("media-type", "").lower()
+        in {"application/xhtml+xml", "text/html", "application/x-dtbook+xml"}
+        and item.attrib.get("href")
+    ]
+    for item in content_items:
+        href = item.attrib["href"]
+        content_package_path = _join_package_path(package_dir, href)
+        content_file = work_dir / Path(*PurePosixPath(content_package_path).parts)
+        if not content_file.is_file():
+            continue
+        issues.extend(_document_link_issues(work_dir, content_file, content_package_path))
+    return issues
+
+
+def _document_link_issues(
+    work_dir: Path,
+    content_file: Path,
+    content_package_path: str,
+) -> list[ValidationIssue]:
+    parser = etree.XMLParser(resolve_entities=False, no_network=True, recover=True)
+    root = etree.parse(str(content_file), parser).getroot()
+    issues: list[ValidationIssue] = []
+    for element in root.xpath("//*[@href or @src]"):
+        for attr in ("href", "src"):
+            value = element.attrib.get(attr)
+            if not value:
+                continue
+            issue = _link_issue(work_dir, content_package_path, value)
+            if issue is not None:
+                issues.append(issue)
+    return issues
+
+
+def _link_issue(
+    work_dir: Path,
+    content_package_path: str,
+    href: str,
+) -> ValidationIssue | None:
+    parsed = urlsplit(href)
+    scheme = parsed.scheme.lower()
+    if scheme in DANGEROUS_URI_SCHEMES:
+        return ValidationIssue(
+            severity="error",
+            code="unsafe-link-scheme",
+            message=f"Unsafe link scheme found: {href}",
+        )
+    if scheme or parsed.netloc:
+        return None
+    if not parsed.path:
+        return None
+
+    target_package_path = posixpath.normpath(
+        posixpath.join(posixpath.dirname(content_package_path), unquote(parsed.path))
+    )
+    if target_package_path.startswith("../") or target_package_path.startswith("/"):
+        return ValidationIssue(
+            severity="error",
+            code="unsafe-link-target",
+            message=f"Link target escapes the EPUB root: {href}",
+        )
+    target_file = work_dir / Path(*PurePosixPath(target_package_path).parts)
+    if not target_file.is_file():
+        return ValidationIssue(
+            severity="warning",
+            code="missing-link-target",
+            message=f"Link target is missing: {href}",
+        )
+    if parsed.fragment and _is_html_like_path(target_package_path):
+        return _anchor_issue(target_file, parsed.fragment, href)
+    return None
+
+
+def _anchor_issue(target_file: Path, fragment: str, href: str) -> ValidationIssue | None:
+    parser = etree.XMLParser(resolve_entities=False, no_network=True, recover=True)
+    root = etree.parse(str(target_file), parser).getroot()
+    decoded_fragment = unquote(fragment)
+    if root.xpath("//*[@id=$id or @name=$id]", id=decoded_fragment):
+        return None
+    return ValidationIssue(
+        severity="warning",
+        code="missing-link-anchor",
+        message=f"Link anchor is missing: {href}",
+    )
+
+
+def _is_html_like_path(path: str) -> bool:
+    return PurePosixPath(path).suffix.lower() in {".html", ".htm", ".xhtml"}
 
 
 def optimized_filename(filename: str) -> str:
