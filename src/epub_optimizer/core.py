@@ -107,6 +107,11 @@ BODY_MATTER_HINTS = {
     "appendix",
     "epilogue",
 }
+TOC_LABELS = {"contents", "innehall", "innehåll", "table of contents"}
+CHAPTER_LABEL_PREFIXES = {"chapter", "chap", "kapitel"}
+PART_LABEL_PREFIXES = {"part", "del"}
+PROLOGUE_HINTS = {"prolog", "prologue"}
+INTRODUCTION_HINTS = {"intro", "introduction", "introduktion"}
 EO_BLOCK_ROLES = {
     "eo-blockquote",
     "eo-body",
@@ -951,7 +956,7 @@ def _looks_like_toc_document(root: etree._Element) -> bool:
         return False
 
     first_text = _normalized_text(blocks[0]).lower()
-    if first_text not in {"contents", "table of contents"}:
+    if first_text not in TOC_LABELS:
         return False
 
     texts = [_normalized_text(element) for element in blocks[:80]]
@@ -2180,7 +2185,7 @@ def _is_toc_separator(text: str) -> bool:
 def _looks_like_toc_part(element: etree._Element, text: str) -> bool:
     if not _contains_link(element):
         return False
-    if text.lower().startswith("part "):
+    if any(text.lower().startswith(f"{prefix} ") for prefix in PART_LABEL_PREFIXES):
         return True
     words = text.split()
     letters = [char for char in text if char.isalpha()]
@@ -2202,10 +2207,10 @@ def _contains_chapterish_link(element: etree._Element) -> bool:
 def _looks_like_chapterish_label(text: str) -> bool:
     lower_text = text.lower()
     return (
-        lower_text.startswith("chapter ")
-        or lower_text.startswith("part ")
+        any(lower_text.startswith(f"{prefix} ") for prefix in CHAPTER_LABEL_PREFIXES)
+        or any(lower_text.startswith(f"{prefix} ") for prefix in PART_LABEL_PREFIXES)
         or lower_text
-        in {"afterword", "appendix", "epilogue", "introduction", "preface", "prologue"}
+        in {"afterword", "appendix", "epilogue", "introduction", "preface", "prolog", "prologue"}
     )
 
 
@@ -2355,23 +2360,27 @@ def _document_role(item: etree._Element) -> str:
         return "title"
     if tokens & {"colophon", "credits", "creditos", "info"}:
         return "metadata"
-    if "prologue" in tokens:
+    if tokens & PROLOGUE_HINTS:
         return "prologue"
-    if tokens & {"introduction", "intro"}:
+    if tokens & INTRODUCTION_HINTS:
         return "introduction"
     if tokens & BODY_MATTER_HINTS:
         return "chapter"
-    if tokens & {"toc", "contents"}:
+    if tokens & {"toc", "contents", "innehall", "innehåll"}:
         return "toc"
     if _has_front_matter_hint(tokens):
         return "front"
-    if "part" in tokens or any(_has_numbered_prefix(token, "part") for token in tokens):
+    if tokens & PART_LABEL_PREFIXES or any(
+        _has_numbered_prefix(token, prefix) for token in tokens for prefix in PART_LABEL_PREFIXES
+    ):
         return "part"
     if (
-        "chapter" in tokens
-        or "chap" in tokens
-        or any(_has_numbered_prefix(token, "chapter") for token in tokens)
-        or any(_has_numbered_prefix(token, "chap") for token in tokens)
+        tokens & CHAPTER_LABEL_PREFIXES
+        or any(
+            _has_numbered_prefix(token, prefix)
+            for token in tokens
+            for prefix in CHAPTER_LABEL_PREFIXES
+        )
         or "/chap" in values
         or "/ch" in values
     ):

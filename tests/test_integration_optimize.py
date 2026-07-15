@@ -231,6 +231,20 @@ def test_optimize_toc_entries(tmp_path: Path) -> None:
     assert '<p class="eo-toc"' not in toc
 
 
+def test_optimize_swedish_contents_entries(tmp_path: Path) -> None:
+    source = tmp_path / "sv-toc.epub"
+    _write_swedish_toc_epub(source)
+
+    result = optimize_epub(source, tmp_path / "out-sv-toc")
+
+    with zipfile.ZipFile(result.output_path) as archive:
+        toc = archive.read("OEBPS/innehall.xhtml").decode("utf-8")
+
+    assert '<h1 class="eo-toc-heading">Innehåll</h1>' in toc
+    assert '<p class="eo-toc-chapter"><a href="kapitel001.xhtml">Kapitel ett</a></p>' in toc
+    assert '<p class="eo-toc-part"><a href="del.xhtml">Del ett</a></p>' in toc
+
+
 def test_optimize_opaque_front_matter_and_blockquote_alignment(tmp_path: Path) -> None:
     source = tmp_path / "opaque-front.epub"
     _write_opaque_front_matter_epub(source)
@@ -954,6 +968,54 @@ def _write_toc_epub(path: Path) -> None:
 <html xmlns="http://www.w3.org/1999/xhtml">
   <head><title>TOC Test</title></head>
   <body><p>Body.</p></body>
+</html>
+""",
+        )
+
+
+def _write_swedish_toc_epub(path: Path) -> None:
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("mimetype", "application/epub+zip", compress_type=zipfile.ZIP_STORED)
+        archive.writestr(
+            "META-INF/container.xml",
+            """<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>
+""",
+        )
+        archive.writestr(
+            "content.opf",
+            """<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="id" version="3.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="id">urn:test-swedish-toc</dc:identifier>
+    <dc:title>Svensk innehållsförteckning</dc:title>
+    <dc:language>sv</dc:language>
+  </metadata>
+  <manifest>
+    <item id="innehall" href="OEBPS/innehall.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="innehall"/>
+  </spine>
+</package>
+""",
+        )
+        archive.writestr(
+            "OEBPS/innehall.xhtml",
+            """<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head><title>Innehåll</title></head>
+  <body>
+    <h1>Innehåll</h1>
+    <p><a href="kapitel001.xhtml">Kapitel ett</a></p>
+    <p><a href="del.xhtml">Del ett</a></p>
+    <p><a href="kapitel002.xhtml">Kapitel två</a></p>
+    <p><a href="kapitel003.xhtml">Kapitel tre</a></p>
+  </body>
 </html>
 """,
         )
