@@ -102,6 +102,11 @@ FRONT_MATTER_HINTS = {
     "toc",
     "title",
 }
+BODY_MATTER_HINTS = {
+    "afterword",
+    "appendix",
+    "epilogue",
+}
 EO_BLOCK_ROLES = {
     "eo-blockquote",
     "eo-body",
@@ -2199,7 +2204,8 @@ def _looks_like_chapterish_label(text: str) -> bool:
     return (
         lower_text.startswith("chapter ")
         or lower_text.startswith("part ")
-        or lower_text in {"prologue", "epilogue", "introduction", "preface"}
+        or lower_text
+        in {"afterword", "appendix", "epilogue", "introduction", "preface", "prologue"}
     )
 
 
@@ -2353,6 +2359,8 @@ def _document_role(item: etree._Element) -> str:
         return "prologue"
     if tokens & {"introduction", "intro"}:
         return "introduction"
+    if tokens & BODY_MATTER_HINTS:
+        return "chapter"
     if tokens & {"toc", "contents"}:
         return "toc"
     if _has_front_matter_hint(tokens):

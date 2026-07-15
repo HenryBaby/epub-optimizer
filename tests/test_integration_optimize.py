@@ -375,6 +375,21 @@ def test_optimize_narrative_introduction_uses_body_flow(tmp_path: Path) -> None:
     assert "eo-front-body" not in introduction
 
 
+def test_optimize_appendix_uses_chapter_flow(tmp_path: Path) -> None:
+    source = tmp_path / "appendix.epub"
+    _write_appendix_epub(source)
+
+    result = optimize_epub(source, tmp_path / "out-appendix")
+
+    with zipfile.ZipFile(result.output_path) as archive:
+        appendix = archive.read("OEBPS/appendix.xhtml").decode("utf-8")
+
+    assert '<h1 class="eo-chapter">Appendix</h1>' in appendix
+    assert '<p class="eo-first">This appendix begins with narrative-style' in appendix
+    assert '<p class="eo-body">The next appendix paragraph continues' in appendix
+    assert "eo-front-body" not in appendix
+
+
 def test_optimize_metadata_pages_do_not_use_body_flow(tmp_path: Path) -> None:
     source = tmp_path / "metadata.epub"
     _write_metadata_page_epub(source)
@@ -1378,6 +1393,57 @@ def _write_narrative_introduction_epub(path: Path) -> None:
     <p>This is the second long introduction paragraph, also prose-heavy enough
     to prove that this document is not a short title, credit, or metadata page.
     It should continue the introduction body flow.</p>
+  </body>
+</html>
+""",
+        )
+
+
+def _write_appendix_epub(path: Path) -> None:
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr(
+            "mimetype",
+            "application/epub+zip",
+            compress_type=zipfile.ZIP_STORED,
+        )
+        archive.writestr(
+            "META-INF/container.xml",
+            """<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>
+""",
+        )
+        archive.writestr(
+            "content.opf",
+            """<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="id" version="3.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="id">urn:test-appendix</dc:identifier>
+    <dc:title>Appendix Test</dc:title>
+    <dc:language>en</dc:language>
+  </metadata>
+  <manifest>
+    <item id="appendix" href="OEBPS/appendix.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="appendix"/>
+  </spine>
+</package>
+""",
+        )
+        archive.writestr(
+            "OEBPS/appendix.xhtml",
+            """<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head><title>Appendix Test</title></head>
+  <body>
+    <h1>Appendix</h1>
+    <p>This appendix begins with narrative-style supporting material and should
+    use the same body flow as a chapter opening.</p>
+    <p>The next appendix paragraph continues the same supporting context.</p>
   </body>
 </html>
 """,
