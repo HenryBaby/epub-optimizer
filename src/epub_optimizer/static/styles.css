@@ -1045,19 +1045,20 @@ button:disabled {
 
 .analysis-report li {
   position: relative;
-  padding-left: 32px;
+  padding-left: 36px;
 }
 
 .analysis-report li::before {
   position: absolute;
-  top: 9px;
-  left: 10px;
+  top: 50%;
+  left: 14px;
   width: 12px;
   height: 12px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--cyan) 58%, transparent);
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--cyan) 12%, transparent);
   content: "";
+  transform: translateY(-50%);
 }
 
 .image-diagnostics li::before {
