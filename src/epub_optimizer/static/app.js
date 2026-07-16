@@ -23,7 +23,6 @@ const analysisResults = document.querySelector("#analysis-results");
 const automationForm = document.querySelector("#automation-form");
 const automationEnabled = document.querySelector("#automation-enabled");
 const automationAppendSuffix = document.querySelector("#automation-append-suffix");
-const automationProfile = document.querySelector("#automation-profile");
 const automationPollSeconds = document.querySelector("#automation-poll-seconds");
 const automationStableSeconds = document.querySelector("#automation-stable-seconds");
 const automationArchiveRetentionDays = document.querySelector("#automation-archive-retention-days");
@@ -238,7 +237,6 @@ automationForm.addEventListener("submit", async (event) => {
   const payload = {
     enabled: automationEnabled.checked,
     append_suffix: automationAppendSuffix.checked,
-    profile: automationProfile.value,
     poll_seconds: Number.parseInt(automationPollSeconds.value, 10),
     stable_seconds: Number.parseInt(automationStableSeconds.value, 10),
     archive_retention_days: Number.parseInt(automationArchiveRetentionDays.value, 10),
@@ -788,10 +786,8 @@ function renderAutomation(status) {
   const config = status.config || {};
   const paths = status.paths || {};
   const pipeline = status.pipeline || {};
-  renderAutomationProfiles(status.profiles || [], config.profile || "default");
   automationEnabled.checked = Boolean(config.enabled);
   automationAppendSuffix.checked = config.append_suffix !== false;
-  automationProfile.value = config.profile || "default";
   automationPollSeconds.value = config.poll_seconds || 10;
   automationStableSeconds.value = config.stable_seconds || 15;
   automationArchiveRetentionDays.value = config.archive_retention_days || 30;
@@ -941,23 +937,6 @@ function createNotice(message) {
   notice.className = "notice";
   notice.textContent = message;
   return notice;
-}
-
-function renderAutomationProfiles(profiles, activeProfile) {
-  const existingValues = Array.from(automationProfile.options).map((option) => option.value);
-  const nextValues = profiles.map((profile) => profile.key);
-  if (existingValues.join("|") === nextValues.join("|")) {
-    return;
-  }
-
-  automationProfile.replaceChildren();
-  for (const profile of profiles) {
-    const option = document.createElement("option");
-    option.value = profile.key;
-    option.textContent = profile.label;
-    option.selected = profile.key === activeProfile;
-    automationProfile.append(option);
-  }
 }
 
 function renderPipeline(pipeline) {

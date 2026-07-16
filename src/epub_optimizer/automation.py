@@ -24,12 +24,6 @@ DEFAULT_POLL_SECONDS = 10
 DEFAULT_STABLE_SECONDS = 15
 DEFAULT_RETENTION_DAYS = 30
 MAX_HISTORY_ITEMS = 25
-DEFAULT_PROFILE = "default"
-AUTOMATION_PROFILES = {
-    "default": "Default",
-    "shelfmark": "Shelfmark",
-    "manual": "Manual staging",
-}
 
 LOGGER = logging.getLogger(__name__)
 
@@ -40,7 +34,6 @@ class AutomationConfig:
     append_suffix: bool = True
     poll_seconds: int = DEFAULT_POLL_SECONDS
     stable_seconds: int = DEFAULT_STABLE_SECONDS
-    profile: str = DEFAULT_PROFILE
     archive_retention_days: int = DEFAULT_RETENTION_DAYS
     failed_retention_days: int = DEFAULT_RETENTION_DAYS
 
@@ -118,7 +111,6 @@ class AutomationManager:
                     maximum=3600,
                     fallback=self.config.stable_seconds,
                 ),
-                profile=_valid_profile(values.get("profile", self.config.profile)),
                 archive_retention_days=_bounded_int(
                     values.get(
                         "archive_retention_days",
@@ -164,15 +156,15 @@ class AutomationManager:
             raise ValueError("Unsupported retained file kind.")
         async with self._lock:
             removed = 0
-            for paths in self._profile_paths().values():
-                patterns = ["*.epub", "*.error.json"] if kind == "failed" else ["*.epub"]
-                for pattern in patterns:
-                    for path in paths[kind].glob(pattern):
-                        if not path.is_file():
-                            continue
-                        with suppress(FileNotFoundError):
-                            path.unlink()
-                            removed += 1
+            paths = self._active_paths()
+            patterns = ["*.epub", "*.error.json"] if kind == "failed" else ["*.epub"]
+            for pattern in patterns:
+                for path in paths[kind].glob(pattern):
+                    if not path.is_file():
+                        continue
+                    with suppress(FileNotFoundError):
+                        path.unlink()
+                        removed += 1
             return {"removed": removed}
 
     def status(self) -> dict[str, Any]:
@@ -185,9 +177,6 @@ class AutomationManager:
         )
         return {
             "config": asdict(self.config),
-            "profiles": [
-                {"key": key, "label": label} for key, label in AUTOMATION_PROFILES.items()
-            ],
             "paths": {
                 "watch_dir": paths["watch"].as_posix(),
                 "output_dir": paths["output"].as_posix(),
@@ -335,9 +324,6 @@ class AutomationManager:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.failed_dir.mkdir(parents=True, exist_ok=True)
         self.unprocessed_dir.mkdir(parents=True, exist_ok=True)
-        for paths in self._profile_paths().values():
-            for directory in paths.values():
-                directory.mkdir(parents=True, exist_ok=True)
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
         self.history_path.parent.mkdir(parents=True, exist_ok=True)
         self.history_db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -356,13 +342,13 @@ class AutomationManager:
 
     def _cleanup_directory_files(self, key: str, retention_seconds: int, pattern: str) -> None:
         cutoff = time.time() - retention_seconds
-        for paths in self._profile_paths().values():
-            for path in paths[key].glob(pattern):
-                try:
-                    if path.is_file() and path.stat().st_mtime < cutoff:
-                        path.unlink()
-                except OSError:
-                    LOGGER.exception("Failed to clean archived source EPUB %s", path)
+        paths = self._active_paths()
+        for path in paths[key].glob(pattern):
+            try:
+                if path.is_file() and path.stat().st_mtime < cutoff:
+                    path.unlink()
+            except OSError:
+                LOGGER.exception("Failed to clean archived source EPUB %s", path)
 
     def _retention_seconds(self, days: int) -> int:
         if self.unprocessed_retention_seconds is not None:
@@ -370,17 +356,11 @@ class AutomationManager:
         return days * 24 * 60 * 60
 
     def _active_paths(self) -> dict[str, Path]:
-        return self._profile_paths()[_valid_profile(self.config.profile)]
-
-    def _profile_paths(self) -> dict[str, dict[str, Path]]:
         return {
-            key: {
-                "watch": _profile_directory(self.watch_dir, key),
-                "output": _profile_directory(self.output_dir, key),
-                "failed": _profile_directory(self.failed_dir, key),
-                "archive": _profile_directory(self.unprocessed_dir, key),
-            }
-            for key in AUTOMATION_PROFILES
+            "watch": self.watch_dir,
+            "output": self.output_dir,
+            "failed": self.failed_dir,
+            "archive": self.unprocessed_dir,
         }
 
     def _load_config(self) -> AutomationConfig:
@@ -403,7 +383,6 @@ class AutomationManager:
                 maximum=3600,
                 fallback=DEFAULT_STABLE_SECONDS,
             ),
-            profile=_valid_profile(data.get("profile", DEFAULT_PROFILE)),
             archive_retention_days=_bounded_int(
                 data.get("archive_retention_days", DEFAULT_RETENTION_DAYS),
                 minimum=1,
@@ -523,15 +502,6 @@ def _bounded_int(value: object, *, minimum: int, maximum: int, fallback: int) ->
     except (TypeError, ValueError):
         return fallback
     return min(max(parsed, minimum), maximum)
-
-
-def _valid_profile(value: object) -> str:
-    profile = str(value)
-    return profile if profile in AUTOMATION_PROFILES else DEFAULT_PROFILE
-
-
-def _profile_directory(directory: Path, profile: str) -> Path:
-    return directory if profile == DEFAULT_PROFILE else directory / profile
 
 
 def _original_epub_name(filename: str) -> str:

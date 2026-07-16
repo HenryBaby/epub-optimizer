@@ -34,9 +34,9 @@ def test_homepage_renders() -> None:
 
     assert response.status_code == 200
     assert "EPUB Optimizer" in response.text
-    assert "v1.1.8" in response.text
-    assert 'href="/static/favicon.png?v=1.1.8"' in response.text
-    assert 'href="/static/styles.css?v=1.1.8"' in response.text
+    assert "v1.1.9" in response.text
+    assert 'href="/static/favicon.png?v=1.1.9"' in response.text
+    assert 'href="/static/styles.css?v=1.1.9"' in response.text
     assert 'id="optimizer-form"' in response.text
     assert 'name="files"' in response.text
     assert 'id="source-picker"' in response.text
@@ -56,14 +56,13 @@ def test_homepage_renders() -> None:
     assert 'id="automation-clear-history"' in response.text
     assert 'id="automation-clear-archive"' in response.text
     assert 'id="automation-clear-failed"' in response.text
-    assert 'id="automation-profile"' in response.text
     assert 'id="automation-archive-retention-days"' in response.text
     assert 'id="automation-failed-retention-days"' in response.text
     assert 'id="pipeline-watch-count"' in response.text
     assert 'id="pipeline-last-scan"' in response.text
     assert 'id="pipeline-next-scan"' in response.text
     assert 'id="automation-scan-state"' in response.text
-    assert 'src="/static/app.js?v=1.1.8"' in response.text
+    assert 'src="/static/app.js?v=1.1.9"' in response.text
 
 
 def test_automation_status_and_configuration() -> None:
@@ -75,8 +74,8 @@ def test_automation_status_and_configuration() -> None:
     status = response.json()
     assert status["config"]["enabled"] is False
     assert status["config"]["append_suffix"] is True
-    assert status["config"]["profile"] == "default"
-    assert {"key": "shelfmark", "label": "Shelfmark"} in status["profiles"]
+    assert "profile" not in status["config"]
+    assert "profiles" not in status
     assert status["paths"]["watch_dir"].endswith("watch")
     assert status["pipeline"]["watch"] == {"count": 0, "bytes": 0}
     assert status["pipeline"]["output"] == {"count": 0, "bytes": 0}
@@ -88,7 +87,6 @@ def test_automation_status_and_configuration() -> None:
         json={
             "enabled": True,
             "append_suffix": False,
-            "profile": "manual",
             "poll_seconds": 4,
             "stable_seconds": 5,
             "archive_retention_days": 14,
@@ -101,7 +99,6 @@ def test_automation_status_and_configuration() -> None:
     assert updated == {
         "enabled": True,
         "append_suffix": False,
-        "profile": "manual",
         "poll_seconds": 4,
         "stable_seconds": 5,
         "archive_retention_days": 14,
@@ -117,7 +114,7 @@ def test_health_endpoint_reports_service_status() -> None:
     assert response.status_code == 200
     assert response.json() == {
         "status": "ok",
-        "version": "1.1.8",
+        "version": "1.1.9",
         "automation_running": False,
         "automation_enabled": False,
     }
