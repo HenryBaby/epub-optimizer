@@ -31,6 +31,41 @@
         </label>
       </header>
 
+      <section class="panel queue-panel">
+        <div class="panel-heading">
+          <div>
+            <h2>Queue EPUBs</h2>
+            <p>Select EPUB files once, then choose whether to optimize or analyze them.</p>
+          </div>
+          <span class="limit-badge">{{ max_upload_mb }} MB max</span>
+        </div>
+
+        <form id="optimizer-form" action="/optimize" method="post" enctype="multipart/form-data">
+          <div class="dropzone">
+            <button
+              id="source-picker"
+              class="dropzone-main"
+              type="button"
+            >
+              <span class="dropzone-icon" aria-hidden="true">+</span>
+              <span>
+                <strong>Select EPUB files or drop a folder</strong>
+                <small id="file-summary">No files selected</small>
+              </span>
+            </button>
+            <button id="choose-folder" class="folder-link" type="button">Choose folder</button>
+          </div>
+          <input
+            id="files"
+            class="file-input"
+            name="files"
+            type="file"
+            accept=".epub,application/epub+zip"
+            multiple
+          >
+        </form>
+      </section>
+
       <nav class="app-tabs" aria-label="Application sections">
         <button class="tab-button tab-button-active" type="button" data-tab="optimizer" aria-selected="true">
           Optimizer
@@ -44,46 +79,7 @@
       </nav>
 
       <div class="tab-panel tab-panel-active" data-tab-panel="optimizer">
-        <section class="workspace">
-          <div class="panel upload-panel">
-            <div class="panel-heading">
-              <div>
-                <h2>Queue EPUBs</h2>
-                <p>Upload one or multiple files and process them.</p>
-              </div>
-              <span class="limit-badge">{{ max_upload_mb }} MB max</span>
-            </div>
-
-            <form id="optimizer-form" action="/optimize" method="post" enctype="multipart/form-data">
-              <div class="dropzone">
-                <button
-                  id="source-picker"
-                  class="dropzone-main"
-                  type="button"
-                >
-                  <span class="dropzone-icon" aria-hidden="true">+</span>
-                  <span>
-                    <strong>Select EPUB files or drop a folder</strong>
-                    <small id="file-summary">No files selected</small>
-                  </span>
-                </button>
-                <button id="choose-folder" class="folder-link" type="button">Choose folder</button>
-              </div>
-              <input
-                id="files"
-                class="file-input"
-                name="files"
-                type="file"
-                accept=".epub,application/epub+zip"
-                multiple
-              >
-              <label class="filename-option" for="append-suffix">
-                <input id="append-suffix" name="append_suffix" type="checkbox" checked>
-                <span>Append <code>-optimized</code> to output filenames</span>
-              </label>
-              <button id="optimize-button" type="submit">Optimize EPUB</button>
-            </form>
-          </div>
+        <section class="workspace optimizer-workspace">
 
           <div class="panel progress-panel" aria-live="polite">
             <div class="panel-heading compact">
@@ -95,6 +91,21 @@
               </div>
               <p id="status-detail"></p>
             </div>
+
+            <div class="action-strip">
+              <div>
+                <h3>Optimize queued EPUBs</h3>
+                <p>Write optimized EPUB downloads for the files selected above.</p>
+              </div>
+              <div class="action-controls">
+                <label class="filename-option" for="append-suffix">
+                  <input id="append-suffix" name="append_suffix" type="checkbox" checked>
+                  <span>Append <code>-optimized</code> to output filenames</span>
+                </label>
+                <button id="optimize-button" form="optimizer-form" type="submit">Optimize EPUB</button>
+              </div>
+            </div>
+
             <div class="status-card">
               <h2 id="status-title">Ready</h2>
               <div class="meter" aria-hidden="true"><span id="progress-meter"></span></div>
