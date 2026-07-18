@@ -202,7 +202,11 @@ analyzeButton.addEventListener("click", async () => {
   const files = selectedEpubFiles();
   analysisResults.replaceChildren();
   if (files.length === 0) {
-    analysisResults.append(createNotice("No EPUB files selected."));
+    analysisResults.append(
+      createNotice(
+        "No EPUB files selected. Queue a folder or select a single EPUB before analyzing."
+      )
+    );
     return;
   }
 
