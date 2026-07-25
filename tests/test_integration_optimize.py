@@ -3,8 +3,14 @@ import zipfile
 from pathlib import Path
 
 import pytest
+from lxml import etree
 
-from epub_optimizer.core import optimize_epub, preview_epub_changes, validate_epub_details
+from epub_optimizer.core import (
+    _remove_empty_blocks,
+    optimize_epub,
+    preview_epub_changes,
+    validate_epub_details,
+)
 from epub_optimizer.epubcheck import EpubCheckFinding, EpubCheckResult
 from epub_optimizer.errors import InvalidEpubError
 
@@ -15,6 +21,16 @@ class _SequentialEpubCheck:
 
     def check(self, _path: Path) -> EpubCheckResult:
         return next(self.results)
+
+
+def test_empty_block_cleanup_keeps_the_only_body_flow_element() -> None:
+    root = etree.fromstring(
+        b'<html xmlns="http://www.w3.org/1999/xhtml"><body><p id="cover"/></body></html>'
+    )
+
+    _remove_empty_blocks(root)
+
+    assert len(root.xpath("//*[local-name()='body']/*")) == 1
 
 
 def test_optimize_records_unavailable_epubcheck(tmp_path: Path) -> None:

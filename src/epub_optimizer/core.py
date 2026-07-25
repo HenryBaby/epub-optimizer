@@ -1560,6 +1560,17 @@ def _remove_empty_blocks(root: etree._Element) -> None:
         classes = set(element.attrib.get("class", "").lower().split())
         if classes & {"scene-break", "scenebreak", "separator", "ornament", "space-break"}:
             continue
+        parent = element.getparent()
+        if (
+            parent is not None
+            and _local_name(parent) == "body"
+            and not any(
+                isinstance(sibling.tag, str) and sibling is not element for sibling in parent
+            )
+        ):
+            # EPUB 3 requires body to contain at least one flow-content element.
+            # Retaining an otherwise empty final block keeps repeated optimization valid.
+            continue
         _remove_element_preserving_tail(element)
 
 
