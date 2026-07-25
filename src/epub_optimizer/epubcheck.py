@@ -193,10 +193,43 @@ def compare_epubcheck(
         persisting.extend(after_findings[:common])
         resolved.extend(before_findings[common:])
         introduced.extend(after_findings[common:])
+
+    # EPUBCheck caps the concrete locations it emits and summarizes the rest as
+    # ``additionalLocations``. Archive changes can alter which occurrences make
+    # that cap, so a pathless occurrence must be allowed to match a concrete
+    # occurrence of the same diagnostic on the other side.
+    def diagnostic(finding: EpubCheckFinding) -> tuple[str, str]:
+        return (finding.code, " ".join(finding.message.split()))
+
+    remaining_resolved = []
+    introduced_by_diagnostic: dict[tuple[str, str], list[EpubCheckFinding]] = defaultdict(
+        list
+    )
+    for finding in introduced:
+        introduced_by_diagnostic[diagnostic(finding)].append(finding)
+    for finding in resolved:
+        candidates = introduced_by_diagnostic[diagnostic(finding)]
+        match = next(
+            (
+                index
+                for index, candidate in enumerate(candidates)
+                if finding.path is None or candidate.path is None
+            ),
+            None,
+        )
+        if match is None:
+            remaining_resolved.append(finding)
+            continue
+        persisting.append(candidates.pop(match))
+    remaining_introduced = [
+        finding
+        for candidates in introduced_by_diagnostic.values()
+        for finding in candidates
+    ]
     return EpubCheckComparison(
         input_result,
         output_result,
         persisting=persisting,
-        resolved=resolved,
-        introduced=introduced,
+        resolved=remaining_resolved,
+        introduced=remaining_introduced,
     )

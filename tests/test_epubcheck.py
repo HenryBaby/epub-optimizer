@@ -93,6 +93,36 @@ def test_compare_tracks_opaque_additional_location_growth_and_shrink():
     assert shrink.resolved == [opaque, opaque]
 
 
+def test_compare_matches_opaque_and_concrete_occurrences_of_same_error():
+    path_a = EpubCheckFinding("error", "RSC-005", "same error", "OPS/a.xhtml")
+    path_b = EpubCheckFinding("error", "RSC-005", "same error", "OPS/b.xhtml")
+    opaque = EpubCheckFinding("error", "RSC-005", "same error")
+
+    comparison = compare_epubcheck(
+        EpubCheckResult(True, "ok", [path_a, path_b]),
+        EpubCheckResult(True, "ok", [path_a, opaque]),
+    )
+
+    assert len(comparison.persisting) == 2
+    assert comparison.resolved == []
+    assert comparison.introduced == []
+
+
+def test_compare_does_not_match_different_concrete_paths_or_diagnostics():
+    before = EpubCheckFinding("error", "RSC-005", "same error", "OPS/a.xhtml")
+    moved = EpubCheckFinding("error", "RSC-005", "same error", "OPS/b.xhtml")
+    different = EpubCheckFinding("error", "RSC-006", "same error")
+
+    comparison = compare_epubcheck(
+        EpubCheckResult(True, "ok", [before]),
+        EpubCheckResult(True, "ok", [moved, different]),
+    )
+
+    assert comparison.persisting == []
+    assert comparison.resolved == [before]
+    assert set(comparison.introduced) == {moved, different}
+
+
 def test_compare_detects_growth_in_identical_error_occurrences():
     finding = EpubCheckFinding("error", "RSC-005", "same error", "OPS/a.xhtml")
     before = EpubCheckResult(True, "ok", [finding], error_count=1)
