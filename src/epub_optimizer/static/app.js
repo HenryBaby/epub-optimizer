@@ -533,6 +533,7 @@ function appendResult(event) {
   addStat(stats, "Documents", event.content_documents_processed);
   addStat(stats, "Stylesheets", event.stylesheets_replaced);
   addStat(stats, "Images", event.images_preserved);
+  addStat(stats, "Repairs", (event.repair_actions || []).length);
   const epubcheck = event.epubcheck || {};
   const counts = epubcheck.counts || {};
   addStat(stats, "EPUBCheck", epubcheck.available ? "Available" : "Unavailable");
@@ -541,6 +542,17 @@ function appendResult(event) {
   }
   details.append(stats);
   details.append(createChangeReport(event));
+
+  if (event.repair_actions && event.repair_actions.length > 0) {
+    const repairs = document.createElement("ul");
+    repairs.className = "change-report";
+    for (const action of event.repair_actions) {
+      const item = document.createElement("li");
+      item.textContent = action;
+      repairs.append(item);
+    }
+    details.append(repairs);
+  }
 
   if (event.warnings && event.warnings.length > 0) {
     const warnings = document.createElement("ul");
@@ -1003,6 +1015,16 @@ function createAutomationJob(job) {
     job.status === "failed" ? `${failureSummary(job)}${elapsed}` : `${job.message || "No details."}${elapsed}`;
 
   item.append(title, detail);
+  if (job.repair_actions && job.repair_actions.length > 0) {
+    const repairs = document.createElement("ul");
+    repairs.className = "log";
+    for (const action of job.repair_actions) {
+      const repairItem = document.createElement("li");
+      repairItem.textContent = action;
+      repairs.append(repairItem);
+    }
+    item.append(repairs);
+  }
   if (job.diagnostic) {
     item.append(createFailureDetails(job.diagnostic));
   }

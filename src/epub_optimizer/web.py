@@ -475,6 +475,7 @@ async def _optimization_events(
                     stylesheets_replaced=result.stylesheets_replaced,
                     images_preserved=result.images_preserved,
                     image_diagnostics=result.image_diagnostics,
+                    repair_actions=result.repair_actions,
                     warnings=result.warnings,
                     epubcheck=_epubcheck_payload(result.epubcheck),
                 )

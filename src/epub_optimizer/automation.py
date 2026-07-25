@@ -48,6 +48,7 @@ class AutomationJob:
     updated_at: float
     diagnostic: FailureDiagnostic | None = None
     epubcheck: dict[str, Any] | None = None
+    repair_actions: list[str] | None = None
 
 
 class AutomationManager:
@@ -284,6 +285,7 @@ class AutomationManager:
                     elapsed_seconds=round(time.perf_counter() - started, 2),
                     updated_at=time.time(),
                     epubcheck=_epubcheck_payload(getattr(result, "epubcheck", None)),
+                    repair_actions=list(getattr(result, "repair_actions", [])),
                 )
             )
         except Exception as exc:
@@ -497,6 +499,11 @@ def _history_jobs_from_payloads(data: list[object]) -> list[AutomationJob]:
                     epubcheck=(
                         item.get("epubcheck")
                         if isinstance(item.get("epubcheck"), dict)
+                        else None
+                    ),
+                    repair_actions=(
+                        [str(action) for action in item.get("repair_actions", [])]
+                        if isinstance(item.get("repair_actions"), list)
                         else None
                     ),
                 )

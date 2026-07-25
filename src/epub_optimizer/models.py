@@ -21,6 +21,7 @@ class OptimizationResult:
     warnings: list[str] = field(default_factory=list)
     log: list[str] = field(default_factory=list)
     epubcheck: "EpubCheckComparison | None" = None
+    repair_actions: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

@@ -1,0 +1,282 @@
+from __future__ import annotations
+
+import mimetypes
+import posixpath
+from pathlib import Path, PurePosixPath
+from urllib.parse import unquote, urlsplit
+
+from lxml import etree
+
+from epub_optimizer.epubcheck import EpubCheckFinding
+
+OPF_NS = "http://www.idpf.org/2007/opf"
+
+
+def repair_workspace(
+    work_dir: Path,
+    package_path: str,
+    package_tree: etree._ElementTree,
+    findings: list[EpubCheckFinding],
+) -> list[str]:
+    """Apply only deterministic, loss-minimizing EPUB repairs in-place."""
+    codes = {finding.code.upper() for finding in findings}
+    broken_reference_codes = {"RSC-007", "RSC-012"}
+    repair_broken_references = bool(codes & broken_reference_codes)
+    repair_missing_manifest_files = "OPF-003" in codes
+    repair_missing_manifest_entries = "OPF-012" in codes
+    if not (
+        repair_broken_references
+        or repair_missing_manifest_files
+        or repair_missing_manifest_entries
+    ):
+        return []
+    affected_paths = {
+        _normalized_package_path(unquote(finding.path))
+        for finding in findings
+        if finding.code.upper() in broken_reference_codes and finding.path
+    }
+    root = package_tree.getroot()
+    manifest = root.find(f"{{{OPF_NS}}}manifest")
+    if manifest is None:
+        manifest = root.find("manifest")
+    if manifest is None:
+        return []
+    package_dir = posixpath.dirname(package_path)
+    actions: list[str] = []
+    items = [e for e in manifest if isinstance(e.tag, str) and etree.QName(e).localname == "item"]
+    ids = {e.attrib.get("id", "") for e in items}
+    missing_items = []
+    spine_ids: set[str] = set()
+    spine = root.find(f"{{{OPF_NS}}}spine")
+    if spine is None:
+        spine = root.find("spine")
+    if spine is not None:
+        spine_ids = {ref.attrib.get("idref", "") for ref in spine}
+    for item in items:
+        href = item.attrib.get("href")
+        if not href:
+            continue
+        target = _safe_resolve(work_dir, package_dir, href)
+        if target is None:
+            continue
+        if (
+            repair_missing_manifest_files
+            and not target.is_file()
+            and item.attrib.get("id", "") not in spine_ids
+        ):
+            missing_items.append(item)
+    if missing_items:
+        missing_ids = {i.attrib.get("id", "") for i in missing_items}
+        for item in missing_items:
+            href = item.attrib.get("href", "")
+            manifest.remove(item)
+            actions.append(f"Removed missing manifest item: {href}")
+        spine = root.find(f"{{{OPF_NS}}}spine")
+        if spine is None:
+            spine = root.find("spine")
+        if spine is not None:
+            for ref in list(spine):
+                if ref.attrib.get("idref") in missing_ids:
+                    spine.remove(ref)
+                    actions.append(f"Removed stale spine reference: {ref.attrib.get('idref', '')}")
+        items = [
+            e for e in manifest if isinstance(e.tag, str) and etree.QName(e).localname == "item"
+        ]
+        ids = {e.attrib.get("id", "") for e in items}
+
+    content_items = [
+        i
+        for i in items
+        if i.attrib.get("media-type", "").lower()
+        in {"application/xhtml+xml", "text/html", "application/x-dtbook+xml"}
+    ]
+    for item in content_items:
+        href = item.attrib.get("href")
+        if not href:
+            continue
+        rel_path = posixpath.normpath(posixpath.join(package_dir, unquote(href)))
+        repair_document_references = (
+            repair_broken_references
+            and bool(affected_paths)
+            and _normalized_package_path(rel_path) in affected_paths
+        )
+        if not repair_document_references and not repair_missing_manifest_entries:
+            continue
+        content_file = _safe_resolve(work_dir, "", rel_path)
+        if content_file is None:
+            continue
+        if not content_file.is_file():
+            continue
+        try:
+            tree = etree.parse(
+                str(content_file),
+                etree.XMLParser(resolve_entities=False, no_network=True, recover=True),
+            )
+        except (OSError, etree.XMLSyntaxError):
+            continue
+        changed = False
+        elements = tree.getroot().xpath("//*[@href or @src or @data or @*[local-name()='href']]")
+        for element in list(elements):
+            attrs = [a for a in ("href", "src", "data") if a in element.attrib]
+            attrs.extend(
+                a
+                for a in element.attrib
+                if etree.QName(a).localname == "href" and a not in attrs
+            )
+            for attr in attrs:
+                value = element.attrib.get(attr)
+                if not value:
+                    continue
+                parsed = urlsplit(value)
+                if parsed.scheme or parsed.netloc:
+                    continue
+                if not parsed.path and parsed.fragment:
+                    if not repair_document_references:
+                        continue
+                    if _fragment_exists(content_file, unquote(parsed.fragment)):
+                        continue
+                    _remove_reference(element, attr, actions, value)
+                    changed = True
+                    continue
+                if not parsed.path:
+                    continue
+                target_rel = posixpath.normpath(
+                    posixpath.join(posixpath.dirname(rel_path), unquote(parsed.path))
+                )
+                if target_rel.startswith("../") or target_rel.startswith("/"):
+                    continue
+                target = _safe_resolve(work_dir, "", target_rel)
+                if target is None:
+                    continue
+                if parsed.fragment and (not target.is_file() or _is_html(target_rel)):
+                    if target.is_file() and _fragment_exists(target, unquote(parsed.fragment)):
+                        continue
+                    if not target.is_file() and parsed.path:
+                        if not repair_document_references:
+                            continue
+                        _remove_reference(element, attr, actions, value)
+                        changed = True
+                    else:
+                        element.attrib[attr] = parsed.path or ""
+                        actions.append(f"Removed broken fragment: {value}")
+                        changed = True
+                    continue
+                if not target.is_file():
+                    if not repair_document_references:
+                        continue
+                    _remove_reference(element, attr, actions, value)
+                    changed = True
+                    continue
+                if repair_missing_manifest_entries and not _manifest_contains(
+                    items, target_rel, package_dir
+                ):
+                    media = mimetypes.guess_type(target.name)[0]
+                    if media:
+                        new_id = _unique_id(ids, target.stem or "resource")
+                        new_href = posixpath.relpath(target_rel, package_dir or ".")
+                        new_item = etree.Element(
+                            _qualified_like(manifest, "item"),
+                            attrib={"id": new_id, "href": new_href, "media-type": media},
+                        )
+                        manifest.append(new_item)
+                        items.append(new_item)
+                        ids.add(new_id)
+                        actions.append(f"Added manifest item for referenced resource: {new_href}")
+                        changed = True
+
+        if changed:
+            tree.write(
+                str(content_file), encoding="utf-8", xml_declaration=True, pretty_print=False
+            )
+    return actions
+
+
+def _normalized_package_path(path: str) -> str:
+    return posixpath.normpath(path.replace("\\", "/").lstrip("/"))
+
+
+def _remove_reference(element, attr, actions, value):
+    local = etree.QName(element).localname.lower()
+    if local in {"a", "area"} and attr == "href":
+        element.attrib.pop(attr, None)
+        actions.append(f"Removed broken link target (text preserved): {value}")
+    elif local == "img":
+        parent = element.getparent()
+        if parent is not None:
+            alt = element.attrib.get("alt", "").strip()
+            if alt:
+                replacement = etree.Element(_qualified_like(element, "span"))
+                replacement.text = alt
+                replacement.tail = element.tail
+                parent.replace(element, replacement)
+                actions.append(f"Replaced broken image with alt text: {value}")
+            else:
+                parent.remove(element)
+                actions.append(f"Removed broken image without alt text: {value}")
+    elif local in {"object", "audio", "video"}:
+        element.attrib.pop(attr, None)
+        actions.append(f"Removed broken resource attribute; fallback preserved: {value}")
+    elif local in {"link", "script", "image", "source"}:
+        parent = element.getparent()
+        if parent is not None:
+            parent.remove(element)
+            actions.append(f"Removed broken resource element: {value}")
+    else:
+        element.attrib.pop(attr, None)
+        actions.append(f"Removed broken reference: {value}")
+
+
+def _resolve(work_dir: Path, package_dir: str, href: str) -> Path:
+    raw = posixpath.join(package_dir, href)
+    if raw.startswith("/") or PurePosixPath(href).is_absolute():
+        raise ValueError("absolute EPUB path")
+    candidate = (work_dir / Path(*PurePosixPath(posixpath.normpath(raw)).parts)).resolve()
+    root = work_dir.resolve()
+    if candidate != root and root not in candidate.parents:
+        raise ValueError("EPUB path escapes workspace")
+    return candidate
+
+
+def _safe_resolve(work_dir: Path, package_dir: str, href: str) -> Path | None:
+    try:
+        return _resolve(work_dir, package_dir, href)
+    except ValueError:
+        return None
+
+
+def _is_html(path: str) -> bool:
+    return PurePosixPath(path).suffix.lower() in {".xhtml", ".html", ".htm"}
+
+
+def _fragment_exists(path: Path, fragment: str) -> bool:
+    try:
+        root = etree.parse(
+            str(path), etree.XMLParser(resolve_entities=False, no_network=True, recover=True)
+        ).getroot()
+        return bool(root.xpath("//*[@id=$id or @name=$id]", id=fragment))
+    except (OSError, etree.XMLSyntaxError):
+        return False
+
+
+def _manifest_contains(items, target_rel: str, package_dir: str) -> bool:
+    target = posixpath.normpath(target_rel)
+    for item in items:
+        href = item.attrib.get("href", "")
+        if posixpath.normpath(posixpath.join(package_dir, href)) == target:
+            return True
+    return False
+
+
+def _unique_id(ids: set[str], stem: str) -> str:
+    base = "optimizer-" + "".join(c if c.isalnum() else "-" for c in stem).strip("-") or "resource"
+    candidate = base
+    index = 2
+    while candidate in ids:
+        candidate = f"{base}-{index}"
+        index += 1
+    return candidate
+
+
+def _qualified_like(element, local_name):
+    namespace = etree.QName(element).namespace
+    return f"{{{namespace}}}{local_name}" if namespace else local_name

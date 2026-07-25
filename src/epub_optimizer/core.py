@@ -28,6 +28,7 @@ from epub_optimizer.models import (
     ValidationIssue,
     ValidationReport,
 )
+from epub_optimizer.repair import repair_workspace
 from epub_optimizer.style import CANONICAL_CSS
 
 OPF_NS = "http://www.idpf.org/2007/opf"
@@ -293,6 +294,7 @@ def optimize_epub(
         _append_log(log, f"Processed {processed_docs} content document(s).", progress)
         _ensure_optimizer_marker(package_root)
         _write_xml(package_tree, package_file)
+        repair_actions: list[str] = []
         _write_change_manifest(
             work_dir,
             {
@@ -307,30 +309,70 @@ def optimize_epub(
                 "images_preserved": image_count,
                 "image_diagnostics": image_diagnostics,
                 "warnings": warnings,
+                "repair_actions": repair_actions,
             },
         )
         write_epub(work_dir, staged_output_path)
         _append_log(log, "Repackaged optimized EPUB.", progress)
         output_report = validate_epub_details(staged_output_path)
-        _raise_for_validation_report(output_report)
         warnings.extend(
             issue.message for issue in output_report.issues if issue.severity != "error"
         )
         _append_log(log, "Validated optimized EPUB output.", progress)
 
         epubcheck_output = epubcheck_runner.check(staged_output_path)
-        comparison = compare_epubcheck(epubcheck_input, epubcheck_output)
-        if comparison.available and comparison.introduced:
+        max_repairs = 3
+        repair_attempted = False
+        for _ in range(max_repairs):
+            if not epubcheck_output.available or not epubcheck_output.errors:
+                break
+            pass_actions = repair_workspace(
+                work_dir,
+                package_path,
+                package_tree,
+                epubcheck_output.errors,
+            )
+            repair_actions.extend(pass_actions)
+            if not pass_actions:
+                break
+            repair_attempted = True
+            _write_xml(package_tree, package_file)
+            _write_change_manifest(
+                work_dir,
+                {
+                    "generated_by": "EPUB Optimizer",
+                    "version": _optimizer_version(),
+                    "input_filename": input_path.name,
+                    "output_filename": output_filename,
+                    "epub_version": epub_version,
+                    "package_path": package_path,
+                    "content_documents_processed": processed_docs,
+                    "stylesheets_replaced": stylesheets_replaced,
+                    "images_preserved": image_count,
+                    "image_diagnostics": image_diagnostics,
+                    "repair_actions": repair_actions,
+                    "warnings": warnings,
+                },
+            )
+            write_epub(work_dir, staged_output_path)
+            epubcheck_output = epubcheck_runner.check(staged_output_path)
+        final_report = validate_epub_details(staged_output_path)
+        _raise_for_validation_report(final_report)
+        if repair_attempted and not epubcheck_output.available:
+            raise InvalidEpubError(
+                "unrepairable EPUBCheck errors: checker unavailable after repair"
+            )
+        if epubcheck_output.available and epubcheck_output.errors:
             grouped: dict[tuple[str, str], list] = defaultdict(list)
-            for finding in comparison.introduced:
+            for finding in epubcheck_output.errors:
                 grouped[(finding.code, finding.message)].append(finding)
-            detail_parts = []
-            for (code, message), findings in grouped.items():
-                paths = sorted({f.path for f in findings if f.path})
-                suffix = f"; resources: {', '.join(paths)}" if paths else ""
-                detail_parts.append(f"{code}: {message} (x{len(findings)}{suffix})")
-            detail = "; ".join(detail_parts)
-            raise InvalidEpubError(f"Optimized EPUB introduced EPUBCheck errors: {detail}")
+            detail = "; ".join(
+                f"{code}: {message} (x{len(findings)}"
+                f"; resources: {', '.join(sorted({f.path for f in findings if f.path}))})"
+                for (code, message), findings in grouped.items()
+            )
+            raise InvalidEpubError(f"unrepairable EPUBCheck errors: {detail}")
+        comparison = compare_epubcheck(epubcheck_input, epubcheck_output)
         output_check_message = (
             f"EPUBCheck output status: {epubcheck_output.status} "
             f"({len(epubcheck_output.findings)} finding(s))."
@@ -356,6 +398,7 @@ def optimize_epub(
         stylesheets_replaced=stylesheets_replaced,
         images_preserved=image_count,
         image_diagnostics=image_diagnostics,
+        repair_actions=repair_actions,
         warnings=warnings,
         log=log,
         epubcheck=comparison,
@@ -848,9 +891,7 @@ def _publisher_font_hrefs(
             continue
         text = css_path.read_text(encoding="utf-8", errors="ignore")
         for raw in _css_resource_urls(text):
-            target = posixpath.normpath(
-                posixpath.join(posixpath.dirname(href), raw)
-            )
+            target = posixpath.normpath(posixpath.join(posixpath.dirname(href), raw))
             if target in manifest_fonts:
                 referenced.add(target)
     # Inline <style> blocks in content documents can also declare @font-face.
@@ -860,9 +901,7 @@ def _publisher_font_hrefs(
         relative = document.relative_to(work_dir).as_posix()
         text = document.read_text(encoding="utf-8", errors="ignore")
         for raw in _css_resource_urls(text):
-            target = posixpath.normpath(
-                posixpath.join(posixpath.dirname(relative), raw)
-            )
+            target = posixpath.normpath(posixpath.join(posixpath.dirname(relative), raw))
             if package_dir:
                 target = posixpath.relpath(target, package_dir)
             if target in manifest_fonts:
@@ -1190,9 +1229,7 @@ def _navigation_document_markup(
         "  <body>\n"
         '    <nav epub:type="toc" role="doc-toc">\n'
         "      <h1>Contents</h1>\n"
-        "      <ol>\n"
-        + "\n".join(entries)
-        + "\n      </ol>\n"
+        "      <ol>\n" + "\n".join(entries) + "\n      </ol>\n"
         "    </nav>\n"
         "  </body>\n"
         "</html>\n"
@@ -1216,10 +1253,7 @@ def _nav_label_for_item(work_dir: Path, package_dir: str, href: str, index: int)
 
 def _xml_escape(value: str) -> str:
     return (
-        value.replace("&", "&amp;")
-        .replace('"', "&quot;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
+        value.replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;").replace(">", "&gt;")
     )
 
 
@@ -1356,9 +1390,7 @@ def _refine_document_role(root: etree._Element, document_role: str) -> str:
 
 def _looks_like_toc_document(root: etree._Element) -> bool:
     blocks = [
-        element
-        for element in _meaningful_body_blocks(root)
-        if not _has_block_children(element)
+        element for element in _meaningful_body_blocks(root) if not _has_block_children(element)
     ]
     if len(blocks) < 5:
         return False
@@ -1425,9 +1457,7 @@ def _looks_like_narrative_named_section(root: etree._Element, heading_names: set
 
 def _looks_like_metadata_page(root: etree._Element) -> bool:
     blocks = [
-        element
-        for element in _meaningful_body_blocks(root)
-        if not _has_block_children(element)
+        element for element in _meaningful_body_blocks(root) if not _has_block_children(element)
     ]
     if not 2 <= len(blocks) <= 14:
         return False
@@ -1437,13 +1467,10 @@ def _looks_like_metadata_page(root: etree._Element) -> bool:
     metadata_hits = sum(1 for text in texts if _is_metadata_line_text(text))
     short_count = sum(1 for text in texts if len(text) <= 90)
     short_ratio = short_count / len(texts)
-    return (
-        (metadata_hits >= 2 and short_ratio >= 0.5)
-        or (
-            metadata_hits >= 1
-            and short_ratio >= 0.75
-            and any(token in combined for token in {"epub", "isbn", "copyright", "editor"})
-        )
+    return (metadata_hits >= 2 and short_ratio >= 0.5) or (
+        metadata_hits >= 1
+        and short_ratio >= 0.75
+        and any(token in combined for token in {"epub", "isbn", "copyright", "editor"})
     )
 
 
@@ -1879,11 +1906,7 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
                 _replace_classes(element, role)
                 after_boundary = True
                 continue
-            if (
-                after_boundary
-                and not is_front_matter
-                and _is_opening_epigraph_paragraph(element)
-            ):
+            if after_boundary and not is_front_matter and _is_opening_epigraph_paragraph(element):
                 _replace_classes(element, "eo-extract")
                 after_boundary = True
                 opening_epigraph = True
