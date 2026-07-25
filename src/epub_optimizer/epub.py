@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import posixpath
 import shutil
+import unicodedata
 import zipfile
 from pathlib import Path, PurePosixPath
 
@@ -56,6 +57,7 @@ def validate_epub_archive(input_path: Path, max_size_bytes: int | None = None) -
 
 def extract_epub(input_path: Path, destination: Path) -> None:
     destination.mkdir(parents=True, exist_ok=True)
+    extracted_targets: dict[str, Path] = {}
 
     with zipfile.ZipFile(input_path) as archive:
         for info in archive.infolist():
@@ -63,7 +65,11 @@ def extract_epub(input_path: Path, destination: Path) -> None:
             if not str(relative) or info.is_dir():
                 continue
 
-            target = destination / Path(*relative.parts)
+            collision_key = unicodedata.normalize("NFC", relative.as_posix()).casefold()
+            target = extracted_targets.setdefault(
+                collision_key,
+                destination / Path(*relative.parts),
+            )
             target.parent.mkdir(parents=True, exist_ok=True)
             with archive.open(info) as source, target.open("wb") as output:
                 shutil.copyfileobj(source, output)
