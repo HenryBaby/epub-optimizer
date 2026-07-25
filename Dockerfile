@@ -18,7 +18,7 @@ RUN pip install --no-cache-dir .
 
 # Official EPUBCheck distribution and a headless Java runtime.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends openjdk-17-jre-headless curl ca-certificates unzip \
+    && apt-get install -y --no-install-recommends default-jre-headless curl ca-certificates unzip \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /opt/epubcheck \
     && curl -fsSL "https://github.com/w3c/epubcheck/releases/download/v${EPUBCHECK_VERSION}/epubcheck-${EPUBCHECK_VERSION}.zip" -o /tmp/epubcheck.zip \

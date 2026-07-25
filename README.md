@@ -78,7 +78,7 @@ the existing structural validation still runs.
 Set `EPUBCHECK_EXECUTABLE` to a CLI executable, or `EPUBCHECK_JAR` and `JAVA`
 to use the official JAR. `EPUBCHECK_TIMEOUT` may be used by integrations to
 bound subprocess execution. The Docker image bundles EPUBCheck 5.3.0 and a
-headless OpenJDK runtime; see `THIRD_PARTY_NOTICES.md` for provenance and
+Debian default headless OpenJDK runtime; see `THIRD_PARTY_NOTICES.md` for provenance and
 licenses.
 
 Published tags:
