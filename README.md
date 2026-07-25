@@ -61,10 +61,25 @@ GitHub Actions validates Docker builds on pull requests and pushes to `main`.
 Pushing a matching version tag publishes the image:
 
 ```text
-pyproject.toml version = 1.1.9
-git tag v1.1.9
-git push origin v1.1.9
+pyproject.toml version = 1.2.0
+git tag v1.2.0
+git push origin v1.2.0
 ```
+
+## EPUBCheck assurance
+
+When available, the optimizer runs official EPUBCheck 5.3.0 before and after
+optimization. Errors are compared by code, normalized message, and internal
+path (line/column changes do not count). Newly introduced errors fail the job;
+pre-existing errors are reported as persisting and warnings remain non-blocking.
+If EPUBCheck is unavailable, the result explicitly reports `unavailable` and
+the existing structural validation still runs.
+
+Set `EPUBCHECK_EXECUTABLE` to a CLI executable, or `EPUBCHECK_JAR` and `JAVA`
+to use the official JAR. `EPUBCHECK_TIMEOUT` may be used by integrations to
+bound subprocess execution. The Docker image bundles EPUBCheck 5.3.0 and a
+headless OpenJDK runtime; see `THIRD_PARTY_NOTICES.md` for provenance and
+licenses.
 
 Published tags:
 
