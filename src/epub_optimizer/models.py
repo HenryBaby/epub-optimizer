@@ -1,5 +1,9 @@
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from epub_optimizer.epubcheck import EpubCheckComparison
 
 
 @dataclass(frozen=True)
@@ -16,6 +20,7 @@ class OptimizationResult:
     image_diagnostics: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     log: list[str] = field(default_factory=list)
+    epubcheck: "EpubCheckComparison | None" = None
 
 
 @dataclass(frozen=True)

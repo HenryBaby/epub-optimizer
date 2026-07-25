@@ -2,7 +2,92 @@ import json
 import zipfile
 from pathlib import Path
 
+import pytest
+
 from epub_optimizer.core import optimize_epub, preview_epub_changes, validate_epub_details
+from epub_optimizer.epubcheck import EpubCheckFinding, EpubCheckResult
+from epub_optimizer.errors import InvalidEpubError
+
+
+class _SequentialEpubCheck:
+    def __init__(self, *results: EpubCheckResult) -> None:
+        self.results = iter(results)
+
+    def check(self, _path: Path) -> EpubCheckResult:
+        return next(self.results)
+
+
+def test_optimize_records_unavailable_epubcheck(tmp_path: Path) -> None:
+    source = tmp_path / "book.epub"
+    _write_minimal_epub(source)
+    unavailable = EpubCheckResult(False, "unavailable")
+
+    result = optimize_epub(
+        source,
+        tmp_path / "out",
+        epubcheck=_SequentialEpubCheck(unavailable, unavailable),
+    )
+
+    assert result.epubcheck is not None
+    assert result.epubcheck.available is False
+
+
+def test_optimize_allows_persisting_epubcheck_error(tmp_path: Path) -> None:
+    source = tmp_path / "book.epub"
+    _write_minimal_epub(source)
+    finding = EpubCheckFinding("error", "RSC-005", "Existing error", "OEBPS/Text/chapter.xhtml")
+    before = EpubCheckResult(True, "ok", [finding], 1, occurrence_count=1, error_count=1)
+    after = EpubCheckResult(True, "ok", [finding], 1, occurrence_count=1, error_count=1)
+
+    result = optimize_epub(
+        source,
+        tmp_path / "out",
+        epubcheck=_SequentialEpubCheck(before, after),
+    )
+
+    assert result.output_path.is_file()
+    assert result.epubcheck is not None
+    assert result.epubcheck.persisting == [finding]
+    assert not result.epubcheck.introduced
+
+
+def test_optimize_rejects_introduced_epubcheck_error(tmp_path: Path) -> None:
+    source = tmp_path / "book.epub"
+    output_dir = tmp_path / "out"
+    _write_minimal_epub(source)
+    before = EpubCheckResult(True, "ok")
+    introduced = EpubCheckFinding("error", "RSC-005", "New error", "OEBPS/Text/chapter.xhtml")
+    after = EpubCheckResult(True, "ok", [introduced], 1, occurrence_count=1, error_count=1)
+
+    with pytest.raises(InvalidEpubError, match="introduced EPUBCheck errors"):
+        optimize_epub(
+            source,
+            output_dir,
+            epubcheck=_SequentialEpubCheck(before, after),
+        )
+
+    assert not (output_dir / "book-optimized.epub").exists()
+
+
+def test_optimize_preserves_existing_output_when_epubcheck_rejects(tmp_path: Path) -> None:
+    source = tmp_path / "book.epub"
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+    existing_output = output_dir / "book-optimized.epub"
+    existing_output.write_bytes(b"existing")
+    _write_minimal_epub(source)
+    before = EpubCheckResult(True, "ok")
+    introduced = EpubCheckFinding("fatal", "PKG-001", "New fatal", "content.opf")
+    after = EpubCheckResult(True, "ok", [introduced], 1, occurrence_count=1, error_count=1)
+
+    with pytest.raises(InvalidEpubError, match="introduced EPUBCheck errors"):
+        optimize_epub(
+            source,
+            output_dir,
+            epubcheck=_SequentialEpubCheck(before, after),
+        )
+
+    assert existing_output.read_bytes() == b"existing"
 
 
 def test_optimize_minimal_epub(tmp_path: Path) -> None:

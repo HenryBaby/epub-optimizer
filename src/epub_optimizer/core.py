@@ -19,6 +19,7 @@ from epub_optimizer.epub import (
     validate_epub_archive,
     write_epub,
 )
+from epub_optimizer.epubcheck import EpubCheckRunner, compare_epubcheck
 from epub_optimizer.errors import InvalidEpubError
 from epub_optimizer.models import (
     OptimizationPreview,
@@ -171,6 +172,7 @@ def optimize_epub(
     max_size_bytes: int | None = None,
     progress: Callable[[str], None] | None = None,
     preserve_publisher_css: bool = False,
+    epubcheck: EpubCheckRunner | None = None,
 ) -> OptimizationResult:
     started = time.perf_counter()
     log: list[str] = []
@@ -183,9 +185,19 @@ def optimize_epub(
 
     _append_log(log, "Validated EPUB archive.", progress)
     validate_epub_archive(input_path, max_size_bytes=max_size_bytes)
+    epubcheck_runner = epubcheck or EpubCheckRunner()
+    epubcheck_input = epubcheck_runner.check(input_path)
+    _append_log(
+        log,
+        f"EPUBCheck input status: {epubcheck_input.status} "
+        f"({len(epubcheck_input.findings)} finding(s)).",
+        progress,
+    )
 
     with tempfile.TemporaryDirectory(prefix="epub-optimizer-") as temp_name:
-        work_dir = Path(temp_name)
+        temp_dir = Path(temp_name)
+        work_dir = temp_dir / "work"
+        staged_output_path = temp_dir / "optimized.epub"
         extract_epub(input_path, work_dir)
         _append_log(log, "Extracted EPUB into a temporary workspace.", progress)
 
@@ -294,14 +306,30 @@ def optimize_epub(
                 "warnings": warnings,
             },
         )
-        write_epub(work_dir, output_path)
+        write_epub(work_dir, staged_output_path)
         _append_log(log, "Repackaged optimized EPUB.", progress)
-        output_report = validate_epub_details(output_path)
+        output_report = validate_epub_details(staged_output_path)
         _raise_for_validation_report(output_report)
         warnings.extend(
             issue.message for issue in output_report.issues if issue.severity != "error"
         )
         _append_log(log, "Validated optimized EPUB output.", progress)
+
+        epubcheck_output = epubcheck_runner.check(staged_output_path)
+        comparison = compare_epubcheck(epubcheck_input, epubcheck_output)
+        if comparison.available and comparison.introduced:
+            detail = "; ".join(f"{f.code}: {f.message}" for f in comparison.introduced)
+            raise InvalidEpubError(f"Optimized EPUB introduced EPUBCheck errors: {detail}")
+        output_check_message = (
+            f"EPUBCheck output status: {epubcheck_output.status} "
+            f"({len(epubcheck_output.findings)} finding(s))."
+        )
+        _append_log(
+            log,
+            output_check_message,
+            progress,
+        )
+        staged_output_path.replace(output_path)
 
     elapsed = time.perf_counter() - started
     _append_log(log, f"Finished in {elapsed:.2f} seconds.", progress)
@@ -319,6 +347,7 @@ def optimize_epub(
         image_diagnostics=image_diagnostics,
         warnings=warnings,
         log=log,
+        epubcheck=comparison,
     )
 
 
@@ -1819,12 +1848,12 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
                         "eo-caption",
                         "eo-centered",
                         "eo-extract",
-                    "eo-footnote",
-                    "eo-front-list-item",
-                    "eo-front-section",
-                    "eo-image",
-                    "eo-metadata-line",
-                    "eo-metadata-title",
+                        "eo-footnote",
+                        "eo-front-list-item",
+                        "eo-front-section",
+                        "eo-image",
+                        "eo-metadata-line",
+                        "eo-metadata-title",
                         "eo-poetry",
                         "eo-scene-break",
                         "eo-title-author",
