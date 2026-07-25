@@ -5,6 +5,7 @@ import posixpath
 import re
 import tempfile
 import time
+from collections import defaultdict
 from collections.abc import Callable
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path, PurePosixPath
@@ -219,6 +220,8 @@ def optimize_epub(
         removable_hrefs = _removable_manifest_hrefs(
             items,
             preserve_publisher_css=preserve_publisher_css,
+            work_dir=work_dir,
+            package_dir=package_dir,
         )
         stylesheet_role_hrefs = _stylesheet_manifest_hrefs(items)
         stylesheet_class_roles = _stylesheet_class_roles(
@@ -318,7 +321,15 @@ def optimize_epub(
         epubcheck_output = epubcheck_runner.check(staged_output_path)
         comparison = compare_epubcheck(epubcheck_input, epubcheck_output)
         if comparison.available and comparison.introduced:
-            detail = "; ".join(f"{f.code}: {f.message}" for f in comparison.introduced)
+            grouped: dict[tuple[str, str], list] = defaultdict(list)
+            for finding in comparison.introduced:
+                grouped[(finding.code, finding.message)].append(finding)
+            detail_parts = []
+            for (code, message), findings in grouped.items():
+                paths = sorted({f.path for f in findings if f.path})
+                suffix = f"; resources: {', '.join(paths)}" if paths else ""
+                detail_parts.append(f"{code}: {message} (x{len(findings)}{suffix})")
+            detail = "; ".join(detail_parts)
             raise InvalidEpubError(f"Optimized EPUB introduced EPUBCheck errors: {detail}")
         output_check_message = (
             f"EPUBCheck output status: {epubcheck_output.status} "
@@ -379,6 +390,8 @@ def preview_epub_changes(
         removable_hrefs = _removable_manifest_hrefs(
             items,
             preserve_publisher_css=preserve_publisher_css,
+            work_dir=work_dir,
+            package_dir=package_dir,
         )
         content_items = [
             item
@@ -781,8 +794,15 @@ def _removable_manifest_hrefs(
     items: list[etree._Element],
     *,
     preserve_publisher_css: bool = False,
+    work_dir: Path | None = None,
+    package_dir: str = "",
 ) -> list[str]:
     hrefs: list[str] = []
+    referenced_fonts = (
+        _publisher_font_hrefs(work_dir, package_dir, items)
+        if preserve_publisher_css and work_dir is not None
+        else set()
+    )
     for item in items:
         href = item.attrib.get("href")
         if not href:
@@ -793,6 +813,8 @@ def _removable_manifest_hrefs(
         suffix = PurePosixPath(href).suffix.lower()
         if preserve_publisher_css and (media_type == "text/css" or suffix == ".css"):
             continue
+        if preserve_publisher_css and href in referenced_fonts:
+            continue
         if (
             media_type == "text/css"
             or media_type in REMOVABLE_MEDIA_TYPES
@@ -800,6 +822,65 @@ def _removable_manifest_hrefs(
         ):
             hrefs.append(href)
     return hrefs
+
+
+def _publisher_font_hrefs(
+    work_dir: Path, package_dir: str, items: list[etree._Element]
+) -> set[str]:
+    """Return manifest font hrefs referenced by preserved publisher CSS."""
+    manifest_fonts = {
+        item.attrib.get("href")
+        for item in items
+        if item.attrib.get("href")
+        and (
+            item.attrib.get("media-type", "").lower() in REMOVABLE_MEDIA_TYPES
+            or PurePosixPath(item.attrib["href"]).suffix.lower() in REMOVABLE_SUFFIXES
+        )
+    }
+    referenced: set[str] = set()
+    for item in items:
+        media_type = item.attrib.get("media-type", "").lower()
+        href = item.attrib.get("href")
+        if not href or not (media_type == "text/css" or href.lower().endswith(".css")):
+            continue
+        css_path = work_dir / Path(*PurePosixPath(_join_package_path(package_dir, href)).parts)
+        if not css_path.is_file():
+            continue
+        text = css_path.read_text(encoding="utf-8", errors="ignore")
+        for raw in _css_resource_urls(text):
+            target = posixpath.normpath(
+                posixpath.join(posixpath.dirname(href), raw)
+            )
+            if target in manifest_fonts:
+                referenced.add(target)
+    # Inline <style> blocks in content documents can also declare @font-face.
+    for document in work_dir.rglob("*"):
+        if document.suffix.lower() not in {".xhtml", ".html", ".htm"} or not document.is_file():
+            continue
+        relative = document.relative_to(work_dir).as_posix()
+        text = document.read_text(encoding="utf-8", errors="ignore")
+        for raw in _css_resource_urls(text):
+            target = posixpath.normpath(
+                posixpath.join(posixpath.dirname(relative), raw)
+            )
+            if package_dir:
+                target = posixpath.relpath(target, package_dir)
+            if target in manifest_fonts:
+                referenced.add(target)
+    return referenced
+
+
+def _css_resource_urls(text: str) -> list[str]:
+    urls: list[str] = []
+    pattern = re.compile(r"url\(\s*(?:(['\"])(.*?)\1|([^)]*?))\s*\)", flags=re.I | re.S)
+    for match in pattern.finditer(text):
+        raw = (match.group(2) or match.group(3) or "").strip()
+        if not raw or raw.startswith(("/", "//", "data:")) or ":" in raw.split("/", 1)[0]:
+            continue
+        resource = re.split(r"[?#]", raw, maxsplit=1)[0].strip()
+        if resource:
+            urls.append(resource)
+    return urls
 
 
 def _stylesheet_manifest_hrefs(items: list[etree._Element]) -> list[str]:
@@ -836,6 +917,8 @@ def _replace_removable_manifest_items(
             canonical_exists = True
             continue
         if preserve_publisher_css and is_publisher_css:
+            continue
+        if href not in removable_hrefs:
             continue
         if (
             media_type == "text/css"
@@ -990,6 +1073,9 @@ def _process_content_document(
         _remove_stylesheet_links(head, preserve_publisher_css=preserve_publisher_css)
         css_href = make_relative_href(content_package_path, canonical_css_package_href)
         _append_stylesheet_link(head, css_href)
+
+    if not preserve_publisher_css:
+        _remove_inline_styles(root)
 
     _sanitize_links(root)
     _apply_presentation_role_hints(root, stylesheet_class_roles)
@@ -1210,6 +1296,13 @@ def _remove_stylesheet_links(
             continue
         if "stylesheet" in rel and not preserve_publisher_css:
             head.remove(link)
+
+
+def _remove_inline_styles(root: etree._Element) -> None:
+    for style in list(root.xpath("//*[local-name()='style']")):
+        parent = style.getparent()
+        if parent is not None:
+            parent.remove(style)
 
 
 def _append_stylesheet_link(head: etree._Element, href: str) -> None:

@@ -56,16 +56,22 @@ def test_optimize_rejects_introduced_epubcheck_error(tmp_path: Path) -> None:
     output_dir = tmp_path / "out"
     _write_minimal_epub(source)
     before = EpubCheckResult(True, "ok")
-    introduced = EpubCheckFinding("error", "RSC-005", "New error", "OEBPS/Text/chapter.xhtml")
-    after = EpubCheckResult(True, "ok", [introduced], 1, occurrence_count=1, error_count=1)
+    introduced = [
+        EpubCheckFinding("error", "RSC-007", "Missing font", f"OEBPS/Text/c{i}.xhtml")
+        for i in range(3)
+    ]
+    after = EpubCheckResult(True, "ok", introduced, 1, occurrence_count=3, error_count=3)
 
-    with pytest.raises(InvalidEpubError, match="introduced EPUBCheck errors"):
+    with pytest.raises(InvalidEpubError, match="introduced EPUBCheck errors") as exc_info:
         optimize_epub(
             source,
             output_dir,
             epubcheck=_SequentialEpubCheck(before, after),
         )
 
+    assert str(exc_info.value).count("RSC-007: Missing font") == 1
+    assert "x3" in str(exc_info.value)
+    assert "OEBPS/Text/c0.xhtml" in str(exc_info.value)
     assert not (output_dir / "book-optimized.epub").exists()
 
 
@@ -118,6 +124,8 @@ def test_optimize_minimal_epub(tmp_path: Path) -> None:
     assert "epub-optimizer.css" in opf
     assert 'name="epub-optimizer:version"' in opf
     assert "old.css" not in opf
+    assert "<style" not in chapter
+    assert "publisher.woff2" not in chapter
     assert "publisher.woff2" not in opf
     assert "page-template.xpgt" not in opf
     assert 'properties="nav"' in opf
@@ -187,20 +195,22 @@ def test_optimize_can_preserve_publisher_css(tmp_path: Path) -> None:
     preview = preview_epub_changes(source, preserve_publisher_css=True)
     result = optimize_epub(source, tmp_path / "out-preserve-css", preserve_publisher_css=True)
 
-    assert preview.stylesheets_and_fonts == 2
-    assert result.stylesheets_replaced == 2
+    assert preview.stylesheets_and_fonts == 1
+    assert result.stylesheets_replaced == 1
     with zipfile.ZipFile(result.output_path) as archive:
         names = archive.namelist()
         opf = archive.read("OEBPS/content.opf").decode("utf-8")
         chapter = archive.read("OEBPS/Text/chapter.xhtml").decode("utf-8")
 
     assert "OEBPS/Styles/old.css" in names
-    assert "OEBPS/Fonts/publisher.woff2" not in names
+    assert "OEBPS/Fonts/publisher.woff2" in names
     assert "OEBPS/Misc/page-template.xpgt" not in names
     assert "old.css" in opf
-    assert "publisher.woff2" not in opf
+    assert "publisher.woff2" in opf
     assert "../Styles/old.css" in chapter
     assert "../Styles/epub-optimizer.css" in chapter
+    assert "<style" in chapter
+    assert "../Fonts/publisher.woff2" in chapter
 
 
 def test_optimize_writes_deterministic_epub_archives(tmp_path: Path) -> None:
@@ -719,6 +729,9 @@ def _write_minimal_epub(path: Path) -> None:
   <head>
     <title>Test</title>
     <link href="../Styles/old.css" rel="stylesheet" type="text/css"/>
+    <style type="text/css">
+      @font-face { font-family: PublisherFont; src: url(../Fonts/publisher.woff2?v=1 ); }
+    </style>
   </head>
   <body>
     <h1 class="chapter" style="text-align: right;">Chapter One</h1>
@@ -817,6 +830,9 @@ def _write_link_validation_epub(path: Path) -> None:
 <html xmlns="http://www.w3.org/1999/xhtml">
   <head><title>Links Test</title></head>
   <body>
+    <style type="text/css" scoped="scoped">
+      @font-face { font-family: PublisherFont; src: url('../Fonts/publisher.woff2#regular'); }
+    </style>
     <p><a href="javascript:alert(1)">Unsafe</a></p>
     <p><a href="missing.xhtml">Missing</a></p>
     <p><a href="chapter.xhtml#missing-anchor">Missing anchor</a></p>
