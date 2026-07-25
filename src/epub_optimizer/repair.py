@@ -25,6 +25,14 @@ def repair_workspace(
     repair_broken_references = bool(codes & broken_reference_codes)
     repair_missing_manifest_files = "OPF-003" in codes
     repair_missing_manifest_entries = "OPF-012" in codes
+    structure_paths = {
+        _normalized_package_path(unquote(finding.path))
+        for finding in findings
+        if finding.code.upper() == "RSC-005"
+        and finding.path
+        and "text not allowed here" in finding.message.lower()
+        and "expected element" in finding.message.lower()
+    }
     metadata_findings = [
         finding
         for finding in findings
@@ -32,12 +40,6 @@ def repair_workspace(
         == _normalized_package_path(package_path)
     ]
     repair_metadata = _repair_opf_metadata(package_tree, metadata_findings)
-    if not (
-        repair_broken_references
-        or repair_missing_manifest_files
-        or repair_missing_manifest_entries
-    ):
-        return repair_metadata
     affected_paths = {
         _normalized_package_path(unquote(finding.path))
         for finding in findings
@@ -48,10 +50,32 @@ def repair_workspace(
     if manifest is None:
         manifest = root.find("manifest")
     if manifest is None:
-        return []
+        return repair_metadata
     package_dir = posixpath.dirname(package_path)
     actions: list[str] = list(repair_metadata)
     items = [e for e in manifest if isinstance(e.tag, str) and etree.QName(e).localname == "item"]
+    ncx_paths = {
+        _normalized_package_path(unquote(finding.path))
+        for finding in findings
+        if finding.code.upper() == "NCX-001" and finding.path
+    }
+    if ("OPF-030" in codes and repair_metadata) or ncx_paths:
+        actions.extend(
+            _synchronize_ncx_uid(
+                work_dir,
+                package_dir,
+                package_tree,
+                items,
+                ncx_paths=ncx_paths or None,
+            )
+        )
+    if not (
+        repair_broken_references
+        or repair_missing_manifest_files
+        or repair_missing_manifest_entries
+        or structure_paths
+    ):
+        return actions
     ids = {e.attrib.get("id", "") for e in items}
     missing_items = []
     spine_ids: set[str] = set()
@@ -108,7 +132,12 @@ def repair_workspace(
             and bool(affected_paths)
             and _normalized_package_path(rel_path) in affected_paths
         )
-        if not repair_document_references and not repair_missing_manifest_entries:
+        repair_document_structure = _normalized_package_path(rel_path) in structure_paths
+        if (
+            not repair_document_references
+            and not repair_missing_manifest_entries
+            and not repair_document_structure
+        ):
             continue
         content_file = _safe_resolve(work_dir, "", rel_path)
         if content_file is None:
@@ -123,6 +152,10 @@ def repair_workspace(
         except (OSError, etree.XMLSyntaxError):
             continue
         changed = False
+        if repair_document_structure:
+            structure_actions = _wrap_stray_block_text(tree.getroot(), rel_path)
+            actions.extend(structure_actions)
+            changed = bool(structure_actions)
         elements = tree.getroot().xpath("//*[@href or @src or @data or @*[local-name()='href']]")
         for element in list(elements):
             attrs = [a for a in ("href", "src", "data") if a in element.attrib]
@@ -196,6 +229,117 @@ def repair_workspace(
             tree.write(
                 str(content_file), encoding="utf-8", xml_declaration=True, pretty_print=False
             )
+    return actions
+
+
+def _wrap_stray_block_text(root: etree._Element, rel_path: str) -> list[str]:
+    actions = []
+    block_names = {
+        "address",
+        "article",
+        "aside",
+        "blockquote",
+        "div",
+        "dl",
+        "fieldset",
+        "figure",
+        "footer",
+        "form",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "header",
+        "hr",
+        "main",
+        "nav",
+        "noscript",
+        "ol",
+        "p",
+        "pre",
+        "script",
+        "section",
+        "svg",
+        "table",
+        "ul",
+    }
+    containers = root.xpath("//*[local-name()='body' or local-name()='blockquote']")
+    for container in containers:
+        current_paragraph = None
+        if (container.text or "").strip():
+            current_paragraph = etree.Element(_qualified_like(container, "p"))
+            current_paragraph.text = container.text
+            container.text = None
+            container.insert(0, current_paragraph)
+            actions.append(f"Wrapped stray block text in paragraph: {rel_path}")
+        for child in [element for element in list(container) if element is not current_paragraph]:
+            local = etree.QName(child).localname.lower()
+            if local not in block_names:
+                if current_paragraph is None:
+                    current_paragraph = etree.Element(_qualified_like(container, "p"))
+                    container.insert(container.index(child), current_paragraph)
+                    actions.append(f"Wrapped stray inline content in paragraph: {rel_path}")
+                container.remove(child)
+                current_paragraph.append(child)
+                continue
+            current_paragraph = None
+            if not (child.tail or "").strip():
+                continue
+            current_paragraph = etree.Element(_qualified_like(container, "p"))
+            current_paragraph.text = child.tail
+            child.tail = None
+            container.insert(container.index(child) + 1, current_paragraph)
+            actions.append(f"Wrapped stray block text in paragraph: {rel_path}")
+    return actions
+
+
+def _synchronize_ncx_uid(
+    work_dir: Path,
+    package_dir: str,
+    package_tree: etree._ElementTree,
+    items: list[etree._Element],
+    *,
+    ncx_paths: set[str] | None,
+) -> list[str]:
+    root = package_tree.getroot()
+    identifier_id = root.attrib.get("unique-identifier", "")
+    identifiers = root.xpath(
+        "//*[local-name()='metadata']/*[local-name()='identifier' and @id=$identifier_id]",
+        identifier_id=identifier_id,
+    )
+    if not identifiers or not (identifiers[0].text or "").strip():
+        return []
+    identifier = (identifiers[0].text or "").strip()
+    actions = []
+    for item in items:
+        if item.attrib.get("media-type", "").lower() != "application/x-dtbncx+xml":
+            continue
+        href = item.attrib.get("href", "")
+        decoded_href = unquote(href)
+        package_path = _normalized_package_path(posixpath.join(package_dir, decoded_href))
+        if ncx_paths is not None and package_path not in ncx_paths:
+            continue
+        ncx_path = _safe_resolve(work_dir, package_dir, decoded_href)
+        if ncx_path is None or not ncx_path.is_file():
+            continue
+        try:
+            tree = etree.parse(
+                str(ncx_path),
+                etree.XMLParser(resolve_entities=False, no_network=True, recover=False),
+            )
+        except (OSError, etree.XMLSyntaxError):
+            continue
+        uid_nodes = tree.getroot().xpath(
+            "//*[local-name()='meta' and translate(@name, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', "
+            "'abcdefghijklmnopqrstuvwxyz')='dtb:uid']"
+        )
+        if not uid_nodes or uid_nodes[0].attrib.get("content") == identifier:
+            continue
+        uid_nodes[0].attrib["content"] = identifier
+        tree.write(str(ncx_path), encoding="utf-8", xml_declaration=True, pretty_print=False)
+        actions.append(f"Synchronized NCX identifier with OPF identifier: {href}")
     return actions
 
 

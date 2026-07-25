@@ -1137,6 +1137,11 @@ function recordRunFile(event) {
     stylesheets_replaced: event.stylesheets_replaced,
     images_preserved: event.images_preserved,
     image_diagnostics: event.image_diagnostics || [],
+    repair_actions: event.repair_actions || [],
+    validation_outcome: event.validation_outcome || null,
+    validation_remaining: event.validation_remaining || 0,
+    validation_persisting: event.validation_persisting || 0,
+    epubcheck: event.epubcheck || null,
     warnings: event.warnings || [],
   });
 }

@@ -71,6 +71,42 @@ def test_pathless_finding_does_not_authorize_document_repairs(tmp_path) -> None:
     assert chapter.read_text(encoding="utf-8") == original
 
 
+def test_rsc005_wraps_stray_blockquote_text_without_losing_content(tmp_path) -> None:
+    work = tmp_path / "work"
+    chapter = work / "OEBPS" / "Text" / "chapter.xhtml"
+    chapter.parent.mkdir(parents=True)
+    chapter.write_text(
+        '<html xmlns="http://www.w3.org/1999/xhtml"><body><blockquote>'
+        'Quoted text<strong>bold</strong><code>code</code>tail text'
+        "</blockquote></body></html>",
+        encoding="utf-8",
+    )
+
+    actions = repair_workspace(
+        work,
+        "OEBPS/package.opf",
+        _package_tree("Text/chapter.xhtml"),
+        [
+            EpubCheckFinding(
+                "error",
+                "RSC-005",
+                "text not allowed here; expected element p",
+                "OEBPS/Text/chapter.xhtml",
+            )
+        ],
+    )
+
+    root = etree.parse(str(chapter)).getroot()
+    blockquote = root.xpath("//*[local-name()='blockquote']")[0]
+    assert not (blockquote.text or "").strip()
+    paragraphs = blockquote.xpath("./*[local-name()='p']")
+    assert ["".join(p.itertext()) for p in paragraphs] == ["Quoted textboldcodetail text"]
+    assert paragraphs[0].xpath("./*[local-name()='strong']")
+    assert paragraphs[0].xpath("./*[local-name()='code']")
+    assert "bold" in "".join(blockquote.itertext())
+    assert len(actions) == 1
+
+
 def test_broken_resources_preserve_alt_and_fallback_content(tmp_path) -> None:
     work = tmp_path / "work"
     chapter = work / "OEBPS" / "Text" / "chapter.xhtml"
@@ -113,7 +149,9 @@ def test_repairs_common_opf_metadata_errors_without_removing_primary_metadata(tm
                 <meta refines="#title" property="role">aut</meta>
                 <meta refines="#author" property="role">aut</meta>
               </metadata>
-              <manifest/>
+              <manifest>
+                <item id="ncx" href="toc%20file.ncx" media-type="application/x-dtbncx+xml"/>
+              </manifest>
               <spine/>
             </package>'''
         )
@@ -134,6 +172,13 @@ def test_repairs_common_opf_metadata_errors_without_removing_primary_metadata(tm
             "OEBPS/book.opf",
         ),
     ]
+    ncx = tmp_path / "OEBPS" / "toc file.ncx"
+    ncx.parent.mkdir(parents=True)
+    ncx.write_text(
+        '<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/">'
+        '<head><meta name="dtb:uid" content="old-id"/></head></ncx>',
+        encoding="utf-8",
+    )
 
     actions = repair_workspace(tmp_path, "OEBPS/book.opf", package_tree, findings)
 
@@ -151,6 +196,49 @@ def test_repairs_common_opf_metadata_errors_without_removing_primary_metadata(tm
     assert refinements[0].attrib["refines"] == "#author"
     assert metadata.xpath('*[@property="vendor:accessibility"]')[0].text == "Preserve this"
     assert "Declared known calibre metadata vocabulary" in actions
+    assert f'content="{identifier.text}"' in ncx.read_text(encoding="utf-8")
+    assert any(action.startswith("Synchronized NCX identifier") for action in actions)
+
+
+def test_ncx001_synchronizes_uid_when_opf_identifier_is_already_valid(tmp_path) -> None:
+    package_tree = etree.ElementTree(
+        etree.fromstring(
+            b'''<package xmlns="http://www.idpf.org/2007/opf" version="2.0"
+                unique-identifier="bookid">
+              <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+                <dc:identifier id="bookid">urn:isbn:123</dc:identifier>
+              </metadata>
+              <manifest>
+                <item id="ncx" href="toc%20file.ncx" media-type="application/x-dtbncx+xml"/>
+              </manifest>
+              <spine toc="ncx"/>
+            </package>'''
+        )
+    )
+    ncx = tmp_path / "OEBPS" / "toc file.ncx"
+    ncx.parent.mkdir(parents=True)
+    ncx.write_text(
+        '<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/">'
+        '<head><meta name="dtb:uid" content="old-id"/></head></ncx>',
+        encoding="utf-8",
+    )
+
+    actions = repair_workspace(
+        tmp_path,
+        "OEBPS/book.opf",
+        package_tree,
+        [
+            EpubCheckFinding(
+                "error",
+                "NCX-001",
+                "NCX identifier does not match OPF identifier",
+                "OEBPS/toc file.ncx",
+            )
+        ],
+    )
+
+    assert 'content="urn:isbn:123"' in ncx.read_text(encoding="utf-8")
+    assert actions == ["Synchronized NCX identifier with OPF identifier: toc%20file.ncx"]
 
 
 def _package_tree(content_href: str) -> etree._ElementTree:
