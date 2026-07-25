@@ -155,19 +155,14 @@ class EpubCheckRunner:
                         column=location.get("column"),
                     )
                 )
-            if additional_count > 0 and locations:
-                location = locations[0]
-                findings.extend(
-                    EpubCheckFinding(
-                        severity=severity,
-                        code=str(item.get("ID", item.get("code", item.get("id", "unknown")))),
-                        message=str(item.get("message", "")),
-                        path=location.get("path") or location.get("file"),
-                        line=location.get("line"),
-                        column=location.get("column"),
-                    )
-                    for _ in range(additional_count)
+            findings.extend(
+                EpubCheckFinding(
+                    severity=severity,
+                    code=str(item.get("ID", item.get("code", item.get("id", "unknown")))),
+                    message=str(item.get("message", "")),
                 )
+                for _ in range(max(additional_count, 0))
+            )
         return EpubCheckResult(
             True,
             "ok",

@@ -73,6 +73,24 @@ def test_additional_locations_count_as_occurrences(monkeypatch, tmp_path):
     assert result.occurrence_count == 3
     assert result.error_count == 3
     assert len(result.findings) == 3
+    assert [finding.path for finding in result.findings] == ["a", None, None]
+
+
+def test_compare_tracks_opaque_additional_location_growth_and_shrink():
+    concrete = EpubCheckFinding("error", "RSC-005", "same error", "OPS/a.xhtml")
+    opaque = EpubCheckFinding("error", "RSC-005", "same error")
+    before = EpubCheckResult(True, "ok", [concrete, opaque, opaque], error_count=3)
+    grown = EpubCheckResult(
+        True, "ok", [concrete, opaque, opaque, opaque, opaque], error_count=5
+    )
+
+    growth = compare_epubcheck(before, grown)
+    shrink = compare_epubcheck(grown, before)
+
+    assert len(growth.persisting) == 3
+    assert growth.introduced == [opaque, opaque]
+    assert len(shrink.persisting) == 3
+    assert shrink.resolved == [opaque, opaque]
 
 
 def test_compare_detects_growth_in_identical_error_occurrences():
