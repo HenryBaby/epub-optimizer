@@ -25,14 +25,24 @@ def repair_workspace(
     repair_broken_references = bool(codes & broken_reference_codes)
     repair_missing_manifest_files = "OPF-003" in codes
     repair_missing_manifest_entries = "OPF-012" in codes
-    structure_paths = {
-        _normalized_package_path(unquote(finding.path))
+    structure_findings = [
+        finding
         for finding in findings
         if finding.code.upper() == "RSC-005"
         and finding.path
-        and "text not allowed here" in finding.message.lower()
-        and "expected element" in finding.message.lower()
+        and _is_supported_structure_finding(finding.message)
+    ]
+    flow_structure_paths = {
+        _normalized_package_path(unquote(finding.path))
+        for finding in structure_findings
+        if 'element "pagebreak" not allowed anywhere' not in finding.message.lower()
     }
+    pagebreak_paths = {
+        _normalized_package_path(unquote(finding.path))
+        for finding in structure_findings
+        if 'element "pagebreak" not allowed anywhere' in finding.message.lower()
+    }
+    structure_paths = flow_structure_paths | pagebreak_paths
     metadata_findings = [
         finding
         for finding in findings
@@ -153,9 +163,14 @@ def repair_workspace(
             continue
         changed = False
         if repair_document_structure:
-            structure_actions = _wrap_stray_block_text(tree.getroot(), rel_path)
-            actions.extend(structure_actions)
-            changed = bool(structure_actions)
+            if _normalized_package_path(rel_path) in pagebreak_paths:
+                pagebreak_actions = _normalize_pagebreak_elements(tree.getroot(), rel_path)
+                actions.extend(pagebreak_actions)
+                changed = bool(pagebreak_actions)
+            if _normalized_package_path(rel_path) in flow_structure_paths:
+                structure_actions = _wrap_stray_block_text(tree.getroot(), rel_path)
+                actions.extend(structure_actions)
+                changed = changed or bool(structure_actions)
         elements = tree.getroot().xpath("//*[@href or @src or @data or @*[local-name()='href']]")
         for element in list(elements):
             attrs = [a for a in ("href", "src", "data") if a in element.attrib]
@@ -232,6 +247,28 @@ def repair_workspace(
     return actions
 
 
+def _is_supported_structure_finding(message: str) -> bool:
+    normalized = message.lower()
+    expected_blocks = "expected element" in normalized and '"p"' in normalized
+    return expected_blocks and (
+        "text not allowed here" in normalized
+        or 'element "blockquote" incomplete' in normalized
+        or 'element "span" not allowed here' in normalized
+    ) or 'element "pagebreak" not allowed anywhere' in normalized
+
+
+def _normalize_pagebreak_elements(root: etree._Element, rel_path: str) -> list[str]:
+    actions = []
+    for element in root.xpath("//*[local-name()='pagebreak']"):
+        element.tag = _qualified_like(element, "span")
+        classes = element.attrib.get("class", "").split()
+        if "eo-pagebreak" not in classes:
+            classes.append("eo-pagebreak")
+            element.attrib["class"] = " ".join(classes)
+        actions.append(f"Normalized nonstandard pagebreak element: {rel_path}")
+    return actions
+
+
 def _wrap_stray_block_text(root: etree._Element, rel_path: str) -> list[str]:
     actions = []
     block_names = {
@@ -267,6 +304,8 @@ def _wrap_stray_block_text(root: etree._Element, rel_path: str) -> list[str]:
     }
     containers = root.xpath("//*[local-name()='body' or local-name()='blockquote']")
     for container in containers:
+        if container.getparent() is None:
+            continue
         current_paragraph = None
         if (container.text or "").strip():
             current_paragraph = etree.Element(_qualified_like(container, "p"))
@@ -292,6 +331,11 @@ def _wrap_stray_block_text(root: etree._Element, rel_path: str) -> list[str]:
             child.tail = None
             container.insert(container.index(child) + 1, current_paragraph)
             actions.append(f"Wrapped stray block text in paragraph: {rel_path}")
+    for blockquote in list(root.xpath("//*[local-name()='blockquote']")):
+        if (blockquote.text or "").strip() or len(blockquote):
+            continue
+        blockquote.append(etree.Element(_qualified_like(blockquote, "p")))
+        actions.append(f"Added required paragraph to empty blockquote: {rel_path}")
     return actions
 
 

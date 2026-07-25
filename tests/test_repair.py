@@ -90,7 +90,7 @@ def test_rsc005_wraps_stray_blockquote_text_without_losing_content(tmp_path) -> 
             EpubCheckFinding(
                 "error",
                 "RSC-005",
-                "text not allowed here; expected element p",
+                'text not allowed here; expected element "p"',
                 "OEBPS/Text/chapter.xhtml",
             )
         ],
@@ -105,6 +105,83 @@ def test_rsc005_wraps_stray_blockquote_text_without_losing_content(tmp_path) -> 
     assert paragraphs[0].xpath("./*[local-name()='code']")
     assert "bold" in "".join(blockquote.itertext())
     assert len(actions) == 1
+
+
+def test_rsc005_repairs_empty_blockquotes_direct_spans_and_pagebreaks(tmp_path) -> None:
+    work = tmp_path / "work"
+    chapter = work / "OEBPS" / "Text" / "chapter.xhtml"
+    chapter.parent.mkdir(parents=True)
+    chapter.write_text(
+        '<html xmlns="http://www.w3.org/1999/xhtml"><body>'
+        '<blockquote id="empty"/>Following text<blockquote><span>Inline quote</span></blockquote>'
+        '<p>Before<pagebreak id="p1"/>After</p>'
+        "</body></html>",
+        encoding="utf-8",
+    )
+    findings = [
+        EpubCheckFinding(
+            "error", "RSC-005", 'element "blockquote" incomplete; expected element "p"',
+            "OEBPS/Text/chapter.xhtml",
+        ),
+        EpubCheckFinding(
+            "error", "RSC-005", 'element "span" not allowed here; expected element "p"',
+            "OEBPS/Text/chapter.xhtml",
+        ),
+        EpubCheckFinding(
+            "error", "RSC-005", 'element "pagebreak" not allowed anywhere',
+            "OEBPS/Text/chapter.xhtml",
+        ),
+    ]
+
+    actions = repair_workspace(
+        work, "OEBPS/package.opf", _package_tree("Text/chapter.xhtml"), findings
+    )
+
+    root = etree.parse(str(chapter)).getroot()
+    blockquotes = root.xpath("//*[local-name()='blockquote']")
+    assert len(blockquotes) == 2
+    assert all(blockquote.xpath("./*[local-name()='p']") for blockquote in blockquotes)
+    assert blockquotes[0].attrib["id"] == "empty"
+    assert blockquotes[1].xpath("./*[local-name()='p']/*[local-name()='span']")
+    assert "Following text" in "".join(root.itertext())
+    pagebreak = root.xpath("//*[@id='p1']")[0]
+    assert etree.QName(pagebreak).localname == "span"
+    assert "eo-pagebreak" in pagebreak.attrib["class"]
+    assert any(action.startswith("Added required paragraph") for action in actions)
+
+
+def test_pagebreak_only_repair_does_not_rewrite_unrelated_blockquote(tmp_path) -> None:
+    work = tmp_path / "work"
+    chapter = work / "OEBPS" / "Text" / "chapter.xhtml"
+    chapter.parent.mkdir(parents=True)
+    chapter.write_text(
+        '<html xmlns="http://www.w3.org/1999/xhtml"><body>'
+        '<blockquote id="preserve">Unrelated text</blockquote>'
+        '<p><pagebreak id="page"/></p>'
+        "</body></html>",
+        encoding="utf-8",
+    )
+
+    actions = repair_workspace(
+        work,
+        "OEBPS/package.opf",
+        _package_tree("Text/chapter.xhtml"),
+        [
+            EpubCheckFinding(
+                "error",
+                "RSC-005",
+                'element "pagebreak" not allowed anywhere',
+                "OEBPS/Text/chapter.xhtml",
+            )
+        ],
+    )
+
+    root = etree.parse(str(chapter)).getroot()
+    blockquote = root.xpath("//*[@id='preserve']")[0]
+    assert blockquote.text == "Unrelated text"
+    assert not blockquote.xpath("./*[local-name()='p']")
+    assert etree.QName(root.xpath("//*[@id='page']")[0]).localname == "span"
+    assert actions == ["Normalized nonstandard pagebreak element: OEBPS/Text/chapter.xhtml"]
 
 
 def test_broken_resources_preserve_alt_and_fallback_content(tmp_path) -> None:
