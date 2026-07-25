@@ -7,6 +7,7 @@ import math
 import os
 import shutil
 import subprocess
+from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -154,6 +155,19 @@ class EpubCheckRunner:
                         column=location.get("column"),
                     )
                 )
+            if additional_count > 0 and locations:
+                location = locations[0]
+                findings.extend(
+                    EpubCheckFinding(
+                        severity=severity,
+                        code=str(item.get("ID", item.get("code", item.get("id", "unknown")))),
+                        message=str(item.get("message", "")),
+                        path=location.get("path") or location.get("file"),
+                        line=location.get("line"),
+                        column=location.get("column"),
+                    )
+                    for _ in range(additional_count)
+                )
         return EpubCheckResult(
             True,
             "ok",
@@ -168,12 +182,26 @@ class EpubCheckRunner:
 def compare_epubcheck(
     input_result: EpubCheckResult, output_result: EpubCheckResult
 ) -> EpubCheckComparison:
-    before = {f.fingerprint: f for f in input_result.errors}
-    after = {f.fingerprint: f for f in output_result.errors}
+    before: dict[tuple[str, str, str], list[EpubCheckFinding]] = defaultdict(list)
+    after: dict[tuple[str, str, str], list[EpubCheckFinding]] = defaultdict(list)
+    for finding in input_result.errors:
+        before[finding.fingerprint].append(finding)
+    for finding in output_result.errors:
+        after[finding.fingerprint].append(finding)
+    persisting = []
+    resolved = []
+    introduced = []
+    for fingerprint in before.keys() | after.keys():
+        before_findings = before[fingerprint]
+        after_findings = after[fingerprint]
+        common = min(len(before_findings), len(after_findings))
+        persisting.extend(after_findings[:common])
+        resolved.extend(before_findings[common:])
+        introduced.extend(after_findings[common:])
     return EpubCheckComparison(
         input_result,
         output_result,
-        persisting=[after[k] for k in before.keys() & after.keys()],
-        resolved=[before[k] for k in before.keys() - after.keys()],
-        introduced=[after[k] for k in after.keys() - before.keys()],
+        persisting=persisting,
+        resolved=resolved,
+        introduced=introduced,
     )

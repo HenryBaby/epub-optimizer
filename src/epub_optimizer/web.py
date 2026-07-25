@@ -476,6 +476,9 @@ async def _optimization_events(
                     images_preserved=result.images_preserved,
                     image_diagnostics=result.image_diagnostics,
                     repair_actions=result.repair_actions,
+                    validation_outcome=result.validation_outcome,
+                    validation_remaining=result.validation_remaining,
+                    validation_persisting=result.validation_persisting,
                     warnings=result.warnings,
                     epubcheck=_epubcheck_payload(result.epubcheck),
                 )
@@ -603,6 +606,13 @@ def _epubcheck_payload(comparison: object | None) -> dict[str, object]:
     data["counts"] = {
         key: len(data.get(key, [])) for key in ("persisting", "resolved", "introduced")
     }
+    output = data.get("output", {})
+    remaining = int(output.get("errors", 0)) if isinstance(output, dict) else 0
+    data["validation_outcome"] = (
+        "unavailable" if not data["available"] else "clean" if remaining == 0 else "legacy_issues"
+    )
+    data["remaining"] = remaining
+    data["persisting_count"] = data["counts"]["persisting"]
     return data
 
 

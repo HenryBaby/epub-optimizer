@@ -98,6 +98,61 @@ def test_broken_resources_preserve_alt_and_fallback_content(tmp_path) -> None:
     assert len(actions) == 2
 
 
+def test_repairs_common_opf_metadata_errors_without_removing_primary_metadata(tmp_path) -> None:
+    package_tree = etree.ElementTree(
+        etree.fromstring(
+            b'''<package xmlns="http://www.idpf.org/2007/opf" version="3.0"
+                unique-identifier="missing">
+              <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+                <dc:identifier>urn:isbn:123</dc:identifier>
+                <dc:title id="title">Title stays</dc:title>
+                <dc:creator id="author">Author stays</dc:creator>
+                <meta property="calibre:timestamp">2020-01-01</meta>
+                <meta property="vendor:accessibility">Preserve this</meta>
+                <meta refines="#missing" property="title-type">main</meta>
+                <meta refines="#title" property="role">aut</meta>
+                <meta refines="#author" property="role">aut</meta>
+              </metadata>
+              <manifest/>
+              <spine/>
+            </package>'''
+        )
+    )
+    findings = [
+        EpubCheckFinding("error", "OPF-028", 'Undeclared prefix: "calibre".', "OEBPS/book.opf"),
+        EpubCheckFinding("error", "OPF-028", 'Undeclared prefix: "vendor".', "OEBPS/book.opf"),
+        EpubCheckFinding(
+            "error", "OPF-030", 'The unique-identifier "missing" was not found.', "OEBPS/book.opf"
+        ),
+        EpubCheckFinding(
+            "error", "RSC-005", '@refines missing target id: "missing"', "OEBPS/book.opf"
+        ),
+        EpubCheckFinding(
+            "error",
+            "RSC-005",
+            'Property "role" must refine a "creator", "contributor", or "publisher" property.',
+            "OEBPS/book.opf",
+        ),
+    ]
+
+    actions = repair_workspace(tmp_path, "OEBPS/book.opf", package_tree, findings)
+
+    root = package_tree.getroot()
+    metadata = root.find("{http://www.idpf.org/2007/opf}metadata")
+    assert metadata is not None
+    identifier = metadata.find("{http://purl.org/dc/elements/1.1/}identifier")
+    title = metadata.find("{http://purl.org/dc/elements/1.1/}title")
+    assert identifier is not None and identifier.text == "urn:isbn:123"
+    assert title is not None and title.text == "Title stays"
+    assert root.attrib["unique-identifier"] == identifier.attrib["id"]
+    assert "calibre:" in root.attrib["prefix"]
+    refinements = metadata.xpath("*[@refines]")
+    assert len(refinements) == 1
+    assert refinements[0].attrib["refines"] == "#author"
+    assert metadata.xpath('*[@property="vendor:accessibility"]')[0].text == "Preserve this"
+    assert "Declared known calibre metadata vocabulary" in actions
+
+
 def _package_tree(content_href: str) -> etree._ElementTree:
     root = etree.fromstring(
         f'''<package xmlns="http://www.idpf.org/2007/opf" version="3.0">

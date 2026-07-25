@@ -590,6 +590,17 @@ def _epubcheck_payload(comparison: object | None) -> dict[str, Any] | None:
     payload["counts"] = {
         key: len(payload.get(key, [])) for key in ("persisting", "resolved", "introduced")
     }
+    output = payload.get("output", {})
+    remaining = int(output.get("error_count", 0)) if isinstance(output, dict) else 0
+    payload["validation_outcome"] = (
+        "unavailable"
+        if not payload["available"]
+        else "clean"
+        if remaining == 0
+        else "legacy_issues"
+    )
+    payload["remaining"] = remaining
+    payload["persisting_count"] = payload["counts"]["persisting"]
     return payload
 
 

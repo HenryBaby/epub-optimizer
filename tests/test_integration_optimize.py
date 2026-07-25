@@ -48,15 +48,39 @@ def test_optimize_records_unavailable_epubcheck(tmp_path: Path) -> None:
     assert result.epubcheck.available is False
 
 
-def test_optimize_rejects_persisting_epubcheck_error(tmp_path: Path) -> None:
+def test_optimize_rejects_output_errors_when_input_baseline_is_unavailable(tmp_path: Path) -> None:
+    source = tmp_path / "book.epub"
+    _write_minimal_epub(source)
+    unavailable = EpubCheckResult(False, "unavailable")
+    finding = EpubCheckFinding("fatal", "PKG-001", "Output is invalid", "content.opf")
+    invalid = EpubCheckResult(True, "ok", [finding], 1, occurrence_count=1, error_count=1)
+
+    with pytest.raises(InvalidEpubError, match="without an input baseline"):
+        optimize_epub(
+            source,
+            tmp_path / "out",
+            epubcheck=_SequentialEpubCheck(unavailable, invalid),
+        )
+
+
+def test_optimize_allows_persisting_epubcheck_error_as_legacy_issue(tmp_path: Path) -> None:
     source = tmp_path / "book.epub"
     _write_minimal_epub(source)
     finding = EpubCheckFinding("error", "RSC-005", "Existing error", "OEBPS/Text/chapter.xhtml")
     before = EpubCheckResult(True, "ok", [finding], 1, occurrence_count=1, error_count=1)
     after = EpubCheckResult(True, "ok", [finding], 1, occurrence_count=1, error_count=1)
 
-    with pytest.raises(InvalidEpubError, match="unrepairable EPUBCheck errors"):
-        optimize_epub(source, tmp_path / "out", epubcheck=_SequentialEpubCheck(before, after))
+    result = optimize_epub(
+        source, tmp_path / "out", epubcheck=_SequentialEpubCheck(before, after)
+    )
+
+    assert result.validation_outcome == "legacy_issues"
+    assert result.validation_remaining == 1
+    assert result.validation_persisting == 1
+    with zipfile.ZipFile(result.output_path) as archive:
+        report = json.loads(archive.read("META-INF/epub-optimizer-report.json"))
+    assert report["validation_outcome"] == "legacy_issues"
+    assert report["validation_remaining"] == 1
 
 
 def test_optimize_repairs_broken_link_and_rechecks_to_zero_errors(tmp_path: Path) -> None:
@@ -76,6 +100,7 @@ def test_optimize_repairs_broken_link_and_rechecks_to_zero_errors(tmp_path: Path
 
     assert result.epubcheck is not None
     assert result.epubcheck.output.errors == []
+    assert result.validation_outcome == "clean"
     assert result.repair_actions == [
         "Removed broken link target (text preserved): missing.xhtml"
     ]
@@ -102,7 +127,7 @@ def test_optimize_rejects_unavailable_epubcheck_after_repair(tmp_path: Path) -> 
     broken = EpubCheckResult(True, "ok", [finding], 1, occurrence_count=1, error_count=1)
     unavailable = EpubCheckResult(False, "timeout")
 
-    with pytest.raises(InvalidEpubError, match="checker unavailable after repair"):
+    with pytest.raises(InvalidEpubError, match="unavailable during output validation after repair"):
         optimize_epub(
             source,
             output_dir,
@@ -123,7 +148,7 @@ def test_optimize_rejects_introduced_epubcheck_error(tmp_path: Path) -> None:
     ]
     after = EpubCheckResult(True, "ok", introduced, 1, occurrence_count=3, error_count=3)
 
-    with pytest.raises(InvalidEpubError, match="unrepairable EPUBCheck errors") as exc_info:
+    with pytest.raises(InvalidEpubError, match="introduced EPUBCheck errors") as exc_info:
         optimize_epub(
             source,
             output_dir,
@@ -147,7 +172,7 @@ def test_optimize_preserves_existing_output_when_epubcheck_rejects(tmp_path: Pat
     introduced = EpubCheckFinding("fatal", "PKG-001", "New fatal", "content.opf")
     after = EpubCheckResult(True, "ok", [introduced], 1, occurrence_count=1, error_count=1)
 
-    with pytest.raises(InvalidEpubError, match="unrepairable EPUBCheck errors"):
+    with pytest.raises(InvalidEpubError, match="introduced EPUBCheck errors"):
         optimize_epub(
             source,
             output_dir,

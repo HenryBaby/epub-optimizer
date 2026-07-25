@@ -69,13 +69,13 @@ git push origin v1.2.0
 ## EPUBCheck assurance
 
 When available, the optimizer runs official EPUBCheck 5.3.0 before and after
-optimization. A successful output must contain zero EPUBCheck error/fatal
-findings. Before failing, the optimizer performs a bounded deterministic repair
-pass for broken local XHTML links/resources, missing same-document fragments,
-stale manifest/spine entries, and safely inferable manifest resources. Repair
-actions are recorded in the result and META-INF report. Errors with no safe
-handler are grouped as `unrepairable EPUBCheck errors`; the prior output is
-preserved. Warnings remain non-blocking.
+optimization. It first performs bounded deterministic repairs for supported
+local-reference, manifest, and OPF metadata errors. The final result is marked
+`clean` when no errors remain, or `legacy_issues` when only errors already
+present in the input persist. Optimization fails if it introduces a new
+EPUBCheck error. Repair actions and the validation outcome are recorded in the
+result and META-INF report. Warnings and clearly reported legacy errors remain
+non-blocking.
 If EPUBCheck is unavailable, the result explicitly reports `unavailable` and
 the existing structural validation still runs.
 

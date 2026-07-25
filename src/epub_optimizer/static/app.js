@@ -537,6 +537,11 @@ function appendResult(event) {
   const epubcheck = event.epubcheck || {};
   const counts = epubcheck.counts || {};
   addStat(stats, "EPUBCheck", epubcheck.available ? "Available" : "Unavailable");
+  const outcome = event.validation_outcome || epubcheck.validation_outcome;
+  if (outcome) {
+    const labels = { clean: "Clean (no output errors)", legacy_issues: "Legacy issues (pre-existing errors persist)", unavailable: "Unavailable" };
+    addStat(stats, "Validation outcome", labels[outcome] || outcome);
+  }
   if (epubcheck.available) {
     addStat(stats, "EPUBCheck errors", `introduced ${counts.introduced || 0}, persisting ${counts.persisting || 0}, resolved ${counts.resolved || 0}`);
   }
@@ -1015,6 +1020,17 @@ function createAutomationJob(job) {
     job.status === "failed" ? `${failureSummary(job)}${elapsed}` : `${job.message || "No details."}${elapsed}`;
 
   item.append(title, detail);
+  const validationOutcome = job.epubcheck && job.epubcheck.validation_outcome;
+  if (validationOutcome) {
+    const validation = document.createElement("p");
+    validation.textContent =
+      validationOutcome === "clean"
+        ? "EPUBCheck clean."
+        : validationOutcome === "legacy_issues"
+          ? `Optimized with ${job.epubcheck.remaining || 0} pre-existing validation issue(s).`
+          : "EPUBCheck unavailable.";
+    item.append(validation);
+  }
   if (job.repair_actions && job.repair_actions.length > 0) {
     const repairs = document.createElement("ul");
     repairs.className = "log";

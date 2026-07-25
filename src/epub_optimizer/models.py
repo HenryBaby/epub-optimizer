@@ -22,6 +22,9 @@ class OptimizationResult:
     log: list[str] = field(default_factory=list)
     epubcheck: "EpubCheckComparison | None" = None
     repair_actions: list[str] = field(default_factory=list)
+    validation_outcome: str = "unavailable"
+    validation_remaining: int = 0
+    validation_persisting: int = 0
 
 
 @dataclass(frozen=True)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import mimetypes
 import posixpath
+import re
 from pathlib import Path, PurePosixPath
 from urllib.parse import unquote, urlsplit
 
@@ -24,12 +25,19 @@ def repair_workspace(
     repair_broken_references = bool(codes & broken_reference_codes)
     repair_missing_manifest_files = "OPF-003" in codes
     repair_missing_manifest_entries = "OPF-012" in codes
+    metadata_findings = [
+        finding
+        for finding in findings
+        if finding.path and _normalized_package_path(unquote(finding.path))
+        == _normalized_package_path(package_path)
+    ]
+    repair_metadata = _repair_opf_metadata(package_tree, metadata_findings)
     if not (
         repair_broken_references
         or repair_missing_manifest_files
         or repair_missing_manifest_entries
     ):
-        return []
+        return repair_metadata
     affected_paths = {
         _normalized_package_path(unquote(finding.path))
         for finding in findings
@@ -42,7 +50,7 @@ def repair_workspace(
     if manifest is None:
         return []
     package_dir = posixpath.dirname(package_path)
-    actions: list[str] = []
+    actions: list[str] = list(repair_metadata)
     items = [e for e in manifest if isinstance(e.tag, str) and etree.QName(e).localname == "item"]
     ids = {e.attrib.get("id", "") for e in items}
     missing_items = []
@@ -188,6 +196,93 @@ def repair_workspace(
             tree.write(
                 str(content_file), encoding="utf-8", xml_declaration=True, pretty_print=False
             )
+    return actions
+
+
+def _repair_opf_metadata(
+    package_tree: etree._ElementTree, findings: list[EpubCheckFinding]
+) -> list[str]:
+    """Conservative, finding-gated repairs for common OPF metadata errors."""
+    actions: list[str] = []
+    root = package_tree.getroot()
+    codes = {f.code.upper() for f in findings}
+    metadata = root.find(f"{{{OPF_NS}}}metadata")
+    if metadata is None:
+        metadata = root.find("metadata")
+    if metadata is None:
+        return actions
+    if "OPF-030" in codes:
+        identifiers = [
+            e
+            for e in metadata
+            if etree.QName(e).localname == "identifier" and (e.text or "").strip()
+        ]
+        if identifiers:
+            chosen = next((e for e in identifiers if e.attrib.get("id")), identifiers[0])
+            ident = chosen.attrib.get("id")
+            if not ident:
+                ident = "bookid"
+                used = {e.attrib.get("id") for e in metadata if e.attrib.get("id")}
+                i = 2
+                while ident in used:
+                    ident = f"bookid-{i}"
+                    i += 1
+                chosen.set("id", ident)
+                actions.append(f"Assigned stable id to dc:identifier: {ident}")
+            root.set("unique-identifier", ident)
+            actions.append(f"Pointed package unique-identifier to dc:identifier: {ident}")
+    if "OPF-028" in codes:
+        prefix_attr = root.attrib.get("prefix", "")
+        declared_prefixes = {
+            token.rstrip(":") for token in prefix_attr.split()[::2] if token.endswith(":")
+        }
+        # Calibre's known vocabulary can be declared losslessly. Unknown
+        # vendor metadata is preserved and remains a reported legacy issue.
+        for finding in findings:
+            if finding.code.upper() != "OPF-028":
+                continue
+            match = re.search(r'prefix:\s*"([A-Za-z][\w-]*)"', finding.message, re.I)
+            if not match:
+                continue
+            prefix = match.group(1)
+            if prefix.lower() == "calibre" and prefix not in declared_prefixes:
+                declaration = "calibre: https://calibre-ebook.com"
+                root.set("prefix", f"{prefix_attr} {declaration}".strip())
+                prefix_attr = root.attrib["prefix"]
+                declared_prefixes.add(prefix)
+                actions.append("Declared known calibre metadata vocabulary")
+                continue
+    if "RSC-005" in codes:
+        invalid_properties = {
+            match.group(1)
+            for finding in findings
+            for match in [re.search(r'Property "([^"]+)" must refine', finding.message)]
+            if match
+        }
+        valid_refinement_targets = {
+            "role": {"creator", "contributor", "publisher"},
+            "file-as": {"creator", "contributor"},
+            "title-type": {"title"},
+        }
+        for elem in list(metadata):
+            if etree.QName(elem).localname != "meta" or "refines" not in elem.attrib:
+                continue
+            # Only discard malformed refinement metadata; primary dc:* remains intact.
+            ref = elem.attrib.get("refines", "")
+            prop = elem.attrib.get("property", "")
+            target = next((e for e in metadata if e.attrib.get("id") == ref[1:]), None)
+            target_is_invalid = False
+            allowed_targets = valid_refinement_targets.get(prop)
+            if prop in invalid_properties and target is not None and allowed_targets is not None:
+                target_is_invalid = etree.QName(target).localname not in allowed_targets
+            if (
+                not ref.startswith("#")
+                or not prop
+                or target is None
+                or target_is_invalid
+            ):
+                metadata.remove(elem)
+                actions.append("Removed invalid metadata refinement")
     return actions
 
 

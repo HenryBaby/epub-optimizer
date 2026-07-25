@@ -72,7 +72,18 @@ def test_additional_locations_count_as_occurrences(monkeypatch, tmp_path):
     result = EpubCheckRunner(executable="python").check(tmp_path / "book.epub")
     assert result.occurrence_count == 3
     assert result.error_count == 3
-    assert len(result.findings) == 1
+    assert len(result.findings) == 3
+
+
+def test_compare_detects_growth_in_identical_error_occurrences():
+    finding = EpubCheckFinding("error", "RSC-005", "same error", "OPS/a.xhtml")
+    before = EpubCheckResult(True, "ok", [finding], error_count=1)
+    after = EpubCheckResult(True, "ok", [finding, finding], error_count=2)
+
+    comparison = compare_epubcheck(before, after)
+
+    assert comparison.persisting == [finding]
+    assert comparison.introduced == [finding]
 
 
 def test_compare_treats_fatal_finding_as_blocking():

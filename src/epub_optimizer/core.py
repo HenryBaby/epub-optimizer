@@ -358,21 +358,58 @@ def optimize_epub(
             epubcheck_output = epubcheck_runner.check(staged_output_path)
         final_report = validate_epub_details(staged_output_path)
         _raise_for_validation_report(final_report)
-        if repair_attempted and not epubcheck_output.available:
+        if epubcheck_input.available and not epubcheck_output.available:
+            reason = " after repair" if repair_attempted else ""
             raise InvalidEpubError(
-                "unrepairable EPUBCheck errors: checker unavailable after repair"
+                f"EPUBCheck unavailable during output validation{reason}; output not published"
             )
-        if epubcheck_output.available and epubcheck_output.errors:
+        if not epubcheck_input.available and epubcheck_output.available and epubcheck_output.errors:
+            raise InvalidEpubError(
+                "EPUBCheck output errors cannot be classified without an input baseline"
+            )
+        comparison = compare_epubcheck(epubcheck_input, epubcheck_output)
+        # EPUBCheck is advisory when it reports only errors that were already
+        # present in the input.  Never publish an output that introduces a new
+        # finding; staged_output_path remains untouched on failure.
+        if comparison.available and comparison.introduced:
             grouped: dict[tuple[str, str], list] = defaultdict(list)
-            for finding in epubcheck_output.errors:
+            for finding in comparison.introduced:
                 grouped[(finding.code, finding.message)].append(finding)
             detail = "; ".join(
                 f"{code}: {message} (x{len(findings)}"
                 f"; resources: {', '.join(sorted({f.path for f in findings if f.path}))})"
                 for (code, message), findings in grouped.items()
             )
-            raise InvalidEpubError(f"unrepairable EPUBCheck errors: {detail}")
-        comparison = compare_epubcheck(epubcheck_input, epubcheck_output)
+            raise InvalidEpubError(f"optimized EPUB introduced EPUBCheck errors: {detail}")
+        if not comparison.available:
+            validation_outcome = "unavailable"
+        elif not epubcheck_output.errors:
+            validation_outcome = "clean"
+        else:
+            validation_outcome = "legacy_issues"
+        validation_remaining = epubcheck_output.error_count
+        validation_persisting = len(comparison.persisting)
+        _write_change_manifest(
+            work_dir,
+            {
+                "generated_by": "EPUB Optimizer",
+                "version": _optimizer_version(),
+                "input_filename": input_path.name,
+                "output_filename": output_filename,
+                "epub_version": epub_version,
+                "package_path": package_path,
+                "content_documents_processed": processed_docs,
+                "stylesheets_replaced": stylesheets_replaced,
+                "images_preserved": image_count,
+                "image_diagnostics": image_diagnostics,
+                "repair_actions": repair_actions,
+                "validation_outcome": validation_outcome,
+                "validation_remaining": validation_remaining,
+                "validation_persisting": validation_persisting,
+                "warnings": warnings,
+            },
+        )
+        write_epub(work_dir, staged_output_path)
         output_check_message = (
             f"EPUBCheck output status: {epubcheck_output.status} "
             f"({len(epubcheck_output.findings)} finding(s))."
@@ -402,6 +439,9 @@ def optimize_epub(
         warnings=warnings,
         log=log,
         epubcheck=comparison,
+        validation_outcome=validation_outcome,
+        validation_remaining=validation_remaining,
+        validation_persisting=validation_persisting,
     )
 
 
