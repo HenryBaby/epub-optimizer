@@ -47,6 +47,7 @@ class AutomationJob:
     elapsed_seconds: float | None
     updated_at: float
     diagnostic: FailureDiagnostic | None = None
+    epubcheck: dict[str, Any] | None = None
 
 
 class AutomationManager:
@@ -282,6 +283,7 @@ class AutomationManager:
                     output_filename=result.output_filename,
                     elapsed_seconds=round(time.perf_counter() - started, 2),
                     updated_at=time.time(),
+                    epubcheck=_epubcheck_payload(getattr(result, "epubcheck", None)),
                 )
             )
         except Exception as exc:
@@ -307,6 +309,7 @@ class AutomationManager:
                     elapsed_seconds=round(time.perf_counter() - started, 2),
                     updated_at=time.time(),
                     diagnostic=diagnostic,
+                    epubcheck=None,
                 )
             )
             _write_failure_report(failed_path, diagnostic)
@@ -491,6 +494,11 @@ def _history_jobs_from_payloads(data: list[object]) -> list[AutomationJob]:
                     elapsed_seconds=item.get("elapsed_seconds"),
                     updated_at=float(item.get("updated_at", time.time())),
                     diagnostic=_load_diagnostic(item.get("diagnostic")),
+                    epubcheck=(
+                        item.get("epubcheck")
+                        if isinstance(item.get("epubcheck"), dict)
+                        else None
+                    ),
                 )
             )
     return jobs
@@ -565,6 +573,17 @@ def _optional_str(value: object) -> str | None:
     if value is None:
         return None
     return str(value)
+
+
+def _epubcheck_payload(comparison: object | None) -> dict[str, Any] | None:
+    if comparison is None:
+        return {"available": False, "status": "unavailable"}
+    payload = asdict(comparison)
+    payload["available"] = bool(getattr(comparison, "available", False))
+    payload["counts"] = {
+        key: len(payload.get(key, [])) for key in ("persisting", "resolved", "introduced")
+    }
+    return payload
 
 
 def _stage_label_for_message(message: str) -> str:

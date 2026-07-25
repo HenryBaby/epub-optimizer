@@ -476,6 +476,7 @@ async def _optimization_events(
                     images_preserved=result.images_preserved,
                     image_diagnostics=result.image_diagnostics,
                     warnings=result.warnings,
+                    epubcheck=_epubcheck_payload(result.epubcheck),
                 )
                 successful += 1
                 completed_downloads.append(download_name)
@@ -582,6 +583,26 @@ def _json_event(event_type: str, **payload: object) -> str:
 
 def _json_line(payload: dict[str, object]) -> str:
     return json.dumps(payload, ensure_ascii=False) + "\n"
+
+
+def _epubcheck_payload(comparison: object | None) -> dict[str, object]:
+    if comparison is None:
+        return {"available": False, "status": "unavailable"}
+    from dataclasses import asdict
+
+    data = asdict(comparison)
+    data["available"] = bool(getattr(comparison, "available", False))
+    for key in ("input", "output"):
+        value = data.get(key, {})
+        if isinstance(value, dict):
+            value["occurrence_count"] = value.get(
+                "occurrence_count", len(value.get("findings", []))
+            )
+            value["errors"] = value.get("error_count", 0)
+    data["counts"] = {
+        key: len(data.get(key, [])) for key in ("persisting", "resolved", "introduced")
+    }
+    return data
 
 
 def _diagnostic_event_fields(

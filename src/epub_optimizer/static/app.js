@@ -533,6 +533,12 @@ function appendResult(event) {
   addStat(stats, "Documents", event.content_documents_processed);
   addStat(stats, "Stylesheets", event.stylesheets_replaced);
   addStat(stats, "Images", event.images_preserved);
+  const epubcheck = event.epubcheck || {};
+  const counts = epubcheck.counts || {};
+  addStat(stats, "EPUBCheck", epubcheck.available ? "Available" : "Unavailable");
+  if (epubcheck.available) {
+    addStat(stats, "EPUBCheck errors", `introduced ${counts.introduced || 0}, persisting ${counts.persisting || 0}, resolved ${counts.resolved || 0}`);
+  }
   details.append(stats);
   details.append(createChangeReport(event));
 
