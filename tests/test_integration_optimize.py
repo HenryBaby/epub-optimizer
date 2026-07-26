@@ -1,11 +1,13 @@
 import json
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
 from lxml import etree
 
 from epub_optimizer.core import (
+    _publish_output,
     _remove_empty_blocks,
     optimize_epub,
     preview_epub_changes,
@@ -21,6 +23,78 @@ class _SequentialEpubCheck:
 
     def check(self, _path: Path) -> EpubCheckResult:
         return next(self.results)
+
+
+def test_publish_output_uses_destination_side_atomic_replace(tmp_path: Path, monkeypatch) -> None:
+    staged_dir = tmp_path / "staged-device"
+    output_dir = tmp_path / "mounted-output"
+    staged_dir.mkdir()
+    output_dir.mkdir()
+    staged = staged_dir / "optimized.epub"
+    output = output_dir / "Book-optimized.epub"
+    staged.write_bytes(b"validated epub")
+    replaced = []
+    real_replace = __import__("os").replace
+
+    def assert_destination_replace(source, target) -> None:
+        source_path = Path(source)
+        target_path = Path(target)
+        assert source_path.parent.parent == output_dir
+        assert source_path.parent.name.startswith(".epub-optimizer-staging-")
+        assert source_path.suffix == ".part"
+        assert target_path == output
+        replaced.append((source_path, target_path))
+        real_replace(source_path, target_path)
+
+    monkeypatch.setattr("epub_optimizer.core.os.replace", assert_destination_replace)
+
+    _publish_output(staged, output)
+
+    assert output.read_bytes() == b"validated epub"
+    assert staged.read_bytes() == b"validated epub"
+    assert len(replaced) == 1
+    assert list(output_dir.glob(".epub-optimizer-staging-*")) == []
+
+
+def test_publish_output_cleans_temporary_file_when_replace_fails(
+    tmp_path: Path, monkeypatch
+) -> None:
+    staged = tmp_path / "optimized.epub"
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    output = output_dir / "Book-optimized.epub"
+    staged.write_bytes(b"validated epub")
+
+    def fail_replace(_source, _target) -> None:
+        raise OSError("publish failed")
+
+    monkeypatch.setattr("epub_optimizer.core.os.replace", fail_replace)
+
+    with pytest.raises(OSError, match="publish failed"):
+        _publish_output(staged, output)
+
+    assert not output.exists()
+    assert list(output_dir.glob(".epub-optimizer-staging-*")) == []
+
+
+def test_publish_output_uses_independent_staging_directories_concurrently(tmp_path: Path) -> None:
+    staged_dir = tmp_path / "staged"
+    output_dir = tmp_path / "output"
+    staged_dir.mkdir()
+    output_dir.mkdir()
+    pairs = []
+    for index in range(4):
+        staged = staged_dir / f"book-{index}.epub"
+        output = output_dir / f"book-{index}.epub"
+        staged.write_bytes(f"book {index}".encode())
+        pairs.append((staged, output))
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        list(executor.map(lambda pair: _publish_output(*pair), pairs))
+
+    for index, (_staged, output) in enumerate(pairs):
+        assert output.read_bytes() == f"book {index}".encode()
+    assert list(output_dir.glob(".epub-optimizer-staging-*")) == []
 
 
 def test_empty_block_cleanup_keeps_the_only_body_flow_element() -> None:

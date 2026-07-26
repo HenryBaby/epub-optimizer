@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import os
 import posixpath
 import re
+import shutil
 import tempfile
 import time
 from collections import defaultdict
 from collections.abc import Callable
+from contextlib import suppress
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path, PurePosixPath
 from urllib.parse import unquote, urlsplit
@@ -447,7 +450,7 @@ def optimize_epub(
             output_check_message,
             progress,
         )
-        staged_output_path.replace(output_path)
+        _publish_output(staged_output_path, output_path)
 
     elapsed = time.perf_counter() - started
     _append_log(log, f"Finished in {elapsed:.2f} seconds.", progress)
@@ -485,6 +488,34 @@ def _raise_for_introduced_epubcheck_errors(comparison) -> None:
         for (code, message), findings in grouped.items()
     )
     raise InvalidEpubError(f"optimized EPUB introduced EPUBCheck errors: {detail}")
+
+
+def _publish_output(staged_output_path: Path, output_path: Path) -> None:
+    """Atomically publish a staged EPUB, including across filesystem boundaries."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    staging_dir = Path(
+        tempfile.mkdtemp(prefix=".epub-optimizer-staging-", dir=output_path.parent)
+    )
+    temporary_path: Path | None = None
+    try:
+        with staged_output_path.open("rb") as source, tempfile.NamedTemporaryFile(
+            mode="wb",
+            prefix="publish-",
+            suffix=".part",
+            dir=staging_dir,
+            delete=False,
+        ) as destination:
+            temporary_path = Path(destination.name)
+            shutil.copyfileobj(source, destination)
+            destination.flush()
+            os.fsync(destination.fileno())
+        os.replace(temporary_path, output_path)
+        temporary_path = None
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+        with suppress(OSError):
+            staging_dir.rmdir()
 
 
 def preview_epub_changes(

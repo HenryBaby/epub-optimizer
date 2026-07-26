@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.2.1 - 2026-07-26
+
+### Fixed
+
+- Publish validated automation output safely when `/tmp` and the mounted
+  `/output` directory are on different filesystems.
+- Keep destination publication atomic by copying to a non-EPUB `.part` file in
+  an isolated per-job staging directory on the output filesystem before
+  replacing the final filename.
+- Preserve failed source EPUBs for retry through the existing Reprocess action.
+
 ## 1.2.0 - 2026-07-26
 
 ### Highlights
