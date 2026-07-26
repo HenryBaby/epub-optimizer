@@ -41,7 +41,7 @@ def test_optimize_records_unavailable_epubcheck(tmp_path: Path) -> None:
     result = optimize_epub(
         source,
         tmp_path / "out",
-        epubcheck=_SequentialEpubCheck(unavailable, unavailable),
+        epubcheck=_SequentialEpubCheck(unavailable, unavailable, unavailable),
     )
 
     assert result.epubcheck is not None
@@ -71,7 +71,7 @@ def test_optimize_allows_persisting_epubcheck_error_as_legacy_issue(tmp_path: Pa
     after = EpubCheckResult(True, "ok", [finding], 1, occurrence_count=1, error_count=1)
 
     result = optimize_epub(
-        source, tmp_path / "out", epubcheck=_SequentialEpubCheck(before, after)
+        source, tmp_path / "out", epubcheck=_SequentialEpubCheck(before, after, after)
     )
 
     assert result.validation_outcome == "legacy_issues"
@@ -95,7 +95,7 @@ def test_optimize_repairs_broken_link_and_rechecks_to_zero_errors(tmp_path: Path
     result = optimize_epub(
         source,
         tmp_path / "out",
-        epubcheck=_SequentialEpubCheck(broken, broken, clean),
+        epubcheck=_SequentialEpubCheck(broken, broken, clean, clean),
     )
 
     assert result.epubcheck is not None
@@ -158,6 +158,44 @@ def test_optimize_rejects_introduced_epubcheck_error(tmp_path: Path) -> None:
     assert str(exc_info.value).count("RSC-007: Missing font") == 1
     assert "x3" in str(exc_info.value)
     assert "OEBPS/Text/c0.xhtml" in str(exc_info.value)
+    assert not (output_dir / "book-optimized.epub").exists()
+
+
+def test_optimize_rejects_error_introduced_by_final_report_packaging(tmp_path: Path) -> None:
+    source = tmp_path / "book.epub"
+    output_dir = tmp_path / "out"
+    _write_minimal_epub(source)
+    clean = EpubCheckResult(True, "ok")
+    introduced = EpubCheckFinding("fatal", "PKG-001", "Final archive is invalid", "content.opf")
+    invalid = EpubCheckResult(True, "ok", [introduced], 1, occurrence_count=1, error_count=1)
+
+    with pytest.raises(InvalidEpubError, match="introduced EPUBCheck errors"):
+        optimize_epub(
+            source,
+            output_dir,
+            epubcheck=_SequentialEpubCheck(clean, clean, invalid),
+        )
+
+    assert not (output_dir / "book-optimized.epub").exists()
+
+
+def test_optimize_rejects_final_validation_that_disagrees_with_embedded_report(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "book.epub"
+    output_dir = tmp_path / "out"
+    _write_minimal_epub(source)
+    finding = EpubCheckFinding("error", "RSC-005", "Existing error", "OEBPS/content.opf")
+    baseline = EpubCheckResult(True, "ok", [finding], 1, occurrence_count=1, error_count=1)
+    clean = EpubCheckResult(True, "ok")
+
+    with pytest.raises(InvalidEpubError, match="changed after embedding"):
+        optimize_epub(
+            source,
+            output_dir,
+            epubcheck=_SequentialEpubCheck(baseline, clean, baseline),
+        )
+
     assert not (output_dir / "book-optimized.epub").exists()
 
 

@@ -69,21 +69,38 @@ git push origin v1.2.0
 ## EPUBCheck assurance
 
 When available, the optimizer runs official EPUBCheck 5.3.0 before and after
-optimization. It first performs bounded deterministic repairs for supported
-local-reference, manifest, and OPF metadata errors. The final result is marked
-`clean` when no errors remain, or `legacy_issues` when only errors already
-present in the input persist. Optimization fails if it introduces a new
-EPUBCheck error. Repair actions and the validation outcome are recorded in the
-result and META-INF report. Warnings and clearly reported legacy errors remain
-non-blocking.
-If EPUBCheck is unavailable, the result explicitly reports `unavailable` and
-the existing structural validation still runs.
+optimization. After the initial optimized-output check, it performs bounded
+deterministic repairs for supported local-reference, manifest, and OPF metadata
+errors, revalidates the repaired EPUB, embeds the final report, and validates
+the exact archive that will be published. The final result is marked `clean`
+when no errors remain, or `legacy_issues` when only errors already present in
+the input persist. Optimization fails if it introduces a new EPUBCheck error.
+Repair actions and the validation outcome are recorded in the result and
+META-INF report. Warnings and clearly reported legacy errors remain
+non-blocking. Every run establishes a fresh input baseline, including EPUBs
+that were previously optimized.
+
+The validation outcomes mean:
+
+- `clean`: the optimized EPUB has no EPUBCheck errors.
+- `legacy_issues`: EPUBCheck errors remain, but the optimizer did not introduce
+  a new diagnostic or an error at a new identifiable resource. This is a
+  regression-safety result, not a claim that the EPUB passes EPUBCheck with zero
+  errors.
+- `unavailable`: EPUBCheck could not run. Built-in archive and structural
+  validation still runs, and the unavailable status is reported explicitly.
+
+EPUBCheck caps and summarizes repeated locations. Serialization-only changes
+can alter those occurrence totals even when the relevant XHTML structure is
+equivalent, so count-only changes for an already represented diagnostic and
+resource are advisory. New diagnostics and new identifiable resources remain
+blocking.
 
 Set `EPUBCHECK_EXECUTABLE` to a CLI executable, or `EPUBCHECK_JAR` and `JAVA`
 to use the official JAR. `EPUBCHECK_TIMEOUT` may be used by integrations to
 bound subprocess execution. The Docker image bundles EPUBCheck 5.3.0 and a
-Debian default headless OpenJDK runtime; see `THIRD_PARTY_NOTICES.md` for provenance and
-licenses.
+Debian default headless OpenJDK runtime; see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for provenance and licenses.
 
 Published tags:
 
