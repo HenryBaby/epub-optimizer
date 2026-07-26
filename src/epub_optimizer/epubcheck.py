@@ -226,10 +226,30 @@ def compare_epubcheck(
         for candidates in introduced_by_diagnostic.values()
         for finding in candidates
     ]
+    baseline_by_diagnostic: dict[tuple[str, str], list[EpubCheckFinding]] = defaultdict(list)
+    for finding in input_result.errors:
+        baseline_by_diagnostic[diagnostic(finding)].append(finding)
+    genuinely_introduced = []
+    for finding in remaining_introduced:
+        baseline = baseline_by_diagnostic[diagnostic(finding)]
+        if finding.path is None:
+            known_location = any(candidate.path is None for candidate in baseline)
+        else:
+            known_location = any(
+                candidate.path is None or candidate.path == finding.path
+                for candidate in baseline
+            )
+        if known_location:
+            # EPUBCheck's capped ``additionalLocations`` count can change when
+            # equivalent XHTML is reserialized. Once the same diagnostic and
+            # resource exist in the baseline, multiplicity growth is advisory.
+            persisting.append(finding)
+        else:
+            genuinely_introduced.append(finding)
     return EpubCheckComparison(
         input_result,
         output_result,
         persisting=persisting,
         resolved=remaining_resolved,
-        introduced=remaining_introduced,
+        introduced=genuinely_introduced,
     )

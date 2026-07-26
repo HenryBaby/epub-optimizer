@@ -76,7 +76,7 @@ def test_additional_locations_count_as_occurrences(monkeypatch, tmp_path):
     assert [finding.path for finding in result.findings] == ["a", None, None]
 
 
-def test_compare_tracks_opaque_additional_location_growth_and_shrink():
+def test_compare_treats_opaque_growth_as_advisory_and_tracks_shrink():
     concrete = EpubCheckFinding("error", "RSC-005", "same error", "OPS/a.xhtml")
     opaque = EpubCheckFinding("error", "RSC-005", "same error")
     before = EpubCheckResult(True, "ok", [concrete, opaque, opaque], error_count=3)
@@ -87,8 +87,8 @@ def test_compare_tracks_opaque_additional_location_growth_and_shrink():
     growth = compare_epubcheck(before, grown)
     shrink = compare_epubcheck(grown, before)
 
-    assert len(growth.persisting) == 3
-    assert growth.introduced == [opaque, opaque]
+    assert len(growth.persisting) == 5
+    assert growth.introduced == []
     assert len(shrink.persisting) == 3
     assert shrink.resolved == [opaque, opaque]
 
@@ -123,15 +123,41 @@ def test_compare_does_not_match_different_concrete_paths_or_diagnostics():
     assert set(comparison.introduced) == {moved, different}
 
 
-def test_compare_detects_growth_in_identical_error_occurrences():
+def test_compare_treats_growth_at_existing_resource_as_advisory():
     finding = EpubCheckFinding("error", "RSC-005", "same error", "OPS/a.xhtml")
     before = EpubCheckResult(True, "ok", [finding], error_count=1)
     after = EpubCheckResult(True, "ok", [finding, finding], error_count=2)
 
     comparison = compare_epubcheck(before, after)
 
-    assert comparison.persisting == [finding]
-    assert comparison.introduced == [finding]
+    assert comparison.persisting == [finding, finding]
+    assert comparison.introduced == []
+
+
+def test_compare_detects_growth_at_new_concrete_resource():
+    existing = EpubCheckFinding("error", "RSC-005", "same error", "OPS/a.xhtml")
+    introduced = EpubCheckFinding("error", "RSC-005", "same error", "OPS/b.xhtml")
+
+    comparison = compare_epubcheck(
+        EpubCheckResult(True, "ok", [existing]),
+        EpubCheckResult(True, "ok", [existing, introduced]),
+    )
+
+    assert comparison.persisting == [existing]
+    assert comparison.introduced == [introduced]
+
+
+def test_compare_detects_opaque_growth_without_opaque_baseline():
+    existing = EpubCheckFinding("error", "RSC-005", "same error", "OPS/a.xhtml")
+    opaque = EpubCheckFinding("error", "RSC-005", "same error")
+
+    comparison = compare_epubcheck(
+        EpubCheckResult(True, "ok", [existing]),
+        EpubCheckResult(True, "ok", [existing, opaque]),
+    )
+
+    assert comparison.persisting == [existing]
+    assert comparison.introduced == [opaque]
 
 
 def test_compare_treats_fatal_finding_as_blocking():
