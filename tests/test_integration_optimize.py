@@ -8,6 +8,7 @@ from lxml import etree
 
 from epub_optimizer.core import (
     _publish_output,
+    _remove_deleted_encryption_entries,
     _remove_empty_blocks,
     optimize_epub,
     preview_epub_changes,
@@ -874,7 +875,75 @@ def test_optimize_ignores_comment_nodes_inside_blocks(tmp_path: Path) -> None:
     assert 'class="eo-body"' in chapter
 
 
-def _write_minimal_epub(path: Path, *, broken_link: bool = False) -> None:
+def test_optimize_removes_encryption_record_for_deleted_font(tmp_path: Path) -> None:
+    source = tmp_path / "encrypted-font.epub"
+    _write_minimal_epub(source, encrypted_font=True)
+
+    result = optimize_epub(source, tmp_path / "out")
+
+    with zipfile.ZipFile(result.output_path) as archive:
+        names = archive.namelist()
+    assert "OEBPS/Fonts/publisher.woff2" not in names
+    assert "META-INF/encryption.xml" not in names
+
+
+def test_optimize_preserves_encryption_record_when_font_file_was_already_missing(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "missing-encrypted-font.epub"
+    _write_minimal_epub(source, encrypted_font=True, include_font_file=False)
+
+    result = optimize_epub(source, tmp_path / "out")
+
+    with zipfile.ZipFile(result.output_path) as archive:
+        encryption = archive.read("META-INF/encryption.xml").decode("utf-8")
+    assert "OEBPS/Fonts/publisher.woff2" in encryption
+
+
+def test_encryption_cleanup_preserves_unrelated_records(tmp_path: Path) -> None:
+    encryption_path = tmp_path / "META-INF" / "encryption.xml"
+    encryption_path.parent.mkdir()
+    encryption_path.write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+<encryption xmlns="urn:oasis:names:tc:opendocument:xmlns:container"
+            xmlns:enc="http://www.w3.org/2001/04/xmlenc#"
+            xmlns:other="urn:example:extension">
+  <enc:EncryptedData>
+    <enc:CipherData><enc:CipherReference URI="OEBPS/Fonts/font.otf"/></enc:CipherData>
+  </enc:EncryptedData>
+  <enc:EncryptedData>
+    <enc:CipherData><enc:CipherReference URI="OEBPS/Images/cover.jpg"/></enc:CipherData>
+  </enc:EncryptedData>
+  <enc:EncryptedData>
+    <enc:CipherData>
+      <enc:CipherReference URI="https://example.com/OEBPS/Fonts/font.otf"/>
+    </enc:CipherData>
+  </enc:EncryptedData>
+  <other:EncryptedData>
+    <enc:CipherData><enc:CipherReference URI="OEBPS/Fonts/font.otf"/></enc:CipherData>
+  </other:EncryptedData>
+</encryption>
+""",
+        encoding="utf-8",
+    )
+
+    removed = _remove_deleted_encryption_entries(tmp_path, {"OEBPS/Fonts/font.otf"})
+
+    assert removed == 1
+    remaining = encryption_path.read_text(encoding="utf-8")
+    assert remaining.count('URI="OEBPS/Fonts/font.otf"') == 1
+    assert "OEBPS/Images/cover.jpg" in remaining
+    assert "https://example.com/OEBPS/Fonts/font.otf" in remaining
+    assert "other:EncryptedData" in remaining
+
+
+def _write_minimal_epub(
+    path: Path,
+    *,
+    broken_link: bool = False,
+    encrypted_font: bool = False,
+    include_font_file: bool = True,
+) -> None:
     broken_link_markup = '<p><a href="missing.xhtml">Missing chapter</a></p>' if broken_link else ""
     with zipfile.ZipFile(path, "w") as archive:
         archive.writestr(
@@ -892,6 +961,20 @@ def _write_minimal_epub(path: Path, *, broken_link: bool = False) -> None:
 </container>
 """,
         )
+        if encrypted_font:
+            archive.writestr(
+                "META-INF/encryption.xml",
+                """<?xml version="1.0" encoding="utf-8"?>
+<encryption xmlns="urn:oasis:names:tc:opendocument:xmlns:container"
+            xmlns:enc="http://www.w3.org/2001/04/xmlenc#">
+  <enc:EncryptedData>
+    <enc:CipherData>
+      <enc:CipherReference URI="OEBPS/Fonts/publisher.woff2"/>
+    </enc:CipherData>
+  </enc:EncryptedData>
+</encryption>
+""",
+            )
         archive.writestr(
             "OEBPS/content.opf",
             """<?xml version="1.0" encoding="utf-8"?>
@@ -919,7 +1002,8 @@ def _write_minimal_epub(path: Path, *, broken_link: bool = False) -> None:
             "OEBPS/Styles/old.css",
             "body { font-family: PublisherFont; margin: 2em; }",
         )
-        archive.writestr("OEBPS/Fonts/publisher.woff2", b"fake-font")
+        if include_font_file:
+            archive.writestr("OEBPS/Fonts/publisher.woff2", b"fake-font")
         archive.writestr("OEBPS/Misc/page-template.xpgt", "page-template")
         archive.writestr(
             "OEBPS/Text/chapter.xhtml",

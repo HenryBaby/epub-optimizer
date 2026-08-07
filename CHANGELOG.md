@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.2.2 - 2026-08-07
+
+### Fixed
+
+- Remove obsolete `META-INF/encryption.xml` records when their obfuscated font
+  resources are removed during style and font normalization.
+- Preserve encryption records for resources that remain in the EPUB, and remove
+  `encryption.xml` only when no encrypted resources remain.
+
 ## 1.2.1 - 2026-07-26
 
 ### Fixed

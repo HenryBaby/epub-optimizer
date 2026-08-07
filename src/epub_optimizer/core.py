@@ -36,6 +36,7 @@ from epub_optimizer.style import CANONICAL_CSS
 
 OPF_NS = "http://www.idpf.org/2007/opf"
 XHTML_NS = "http://www.w3.org/1999/xhtml"
+XMLENC_NS = "http://www.w3.org/2001/04/xmlenc#"
 DANGEROUS_URI_SCHEMES = {"javascript", "data", "vbscript", "file"}
 CANONICAL_CSS_ID = "epub-optimizer-css"
 CANONICAL_CSS_HREF = "Styles/epub-optimizer.css"
@@ -253,14 +254,28 @@ def optimize_epub(
             canonical_item_href,
             preserve_publisher_css=preserve_publisher_css,
         )
-        removed_files = _delete_package_files(work_dir, package_dir, removable_hrefs)
+        removed_file_paths = _delete_package_files(work_dir, package_dir, removable_hrefs)
+        removed_encryption_entries = _remove_deleted_encryption_entries(
+            work_dir,
+            set(removed_file_paths),
+        )
         _append_log(
             log,
             f"Removed {stylesheets_replaced} old style/font manifest item(s).",
             progress,
         )
-        if removed_files:
-            _append_log(log, f"Deleted {removed_files} old style/font file(s).", progress)
+        if removed_file_paths:
+            _append_log(
+                log,
+                f"Deleted {len(removed_file_paths)} old style/font file(s).",
+                progress,
+            )
+        if removed_encryption_entries:
+            _append_log(
+                log,
+                f"Removed {removed_encryption_entries} obsolete encryption record(s).",
+                progress,
+            )
 
         processed_docs = 0
         for item in content_items:
@@ -1086,15 +1101,61 @@ def _replace_removable_manifest_items(
     return max(replaced, len(removable_hrefs))
 
 
-def _delete_package_files(work_dir: Path, package_dir: str, hrefs: list[str]) -> int:
-    deleted = 0
+def _delete_package_files(work_dir: Path, package_dir: str, hrefs: list[str]) -> list[str]:
+    deleted: list[str] = []
     for href in hrefs:
         package_path = _join_package_path(package_dir, href)
         file_path = work_dir / Path(*PurePosixPath(package_path).parts)
         if file_path.is_file():
             file_path.unlink()
-            deleted += 1
+            deleted.append(package_path)
     return deleted
+
+
+def _remove_deleted_encryption_entries(work_dir: Path, removed_paths: set[str]) -> int:
+    encryption_path = work_dir / "META-INF" / "encryption.xml"
+    if not removed_paths or not encryption_path.is_file():
+        return 0
+
+    normalized_removed = {posixpath.normpath(path).lstrip("/") for path in removed_paths}
+    tree = _parse_xml(encryption_path)
+    root = tree.getroot()
+    removed = 0
+    encrypted_nodes = root.xpath("//enc:EncryptedData", namespaces={"enc": XMLENC_NS})
+    for encrypted_data in list(encrypted_nodes):
+        references = encrypted_data.xpath(
+            ".//enc:CipherReference/@URI", namespaces={"enc": XMLENC_NS}
+        )
+        resource_paths = {
+            path for uri in references if (path := _encryption_resource_path(uri)) is not None
+        }
+        if resource_paths.isdisjoint(normalized_removed):
+            continue
+        parent = encrypted_data.getparent()
+        if parent is not None:
+            parent.remove(encrypted_data)
+            removed += 1
+
+    if not removed:
+        return 0
+    if any(isinstance(child.tag, str) for child in root):
+        _write_xml(tree, encryption_path)
+    else:
+        encryption_path.unlink()
+    return removed
+
+
+def _encryption_resource_path(uri: str) -> str | None:
+    parsed = urlsplit(uri)
+    if parsed.scheme or parsed.netloc or not parsed.path or parsed.path.startswith("/"):
+        return None
+    path = unquote(parsed.path)
+    if "\\" in path:
+        return None
+    parts = PurePosixPath(path).parts
+    if any(part in {"", ".", ".."} for part in parts):
+        return None
+    return posixpath.normpath(path)
 
 
 def _existing_package_file_count(work_dir: Path, package_dir: str, hrefs: list[str]) -> int:
