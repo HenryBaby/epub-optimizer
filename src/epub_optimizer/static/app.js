@@ -826,7 +826,9 @@ function renderAutomation(status) {
   automationPill.textContent = config.enabled ? "Watching" : "Disabled";
 
   const history = status.history || [];
-  const failedJobs = history.filter((job) => job.status === "failed");
+  const failedJobs = history.filter(
+    (job) => (job.display_status || job.status) === "failed",
+  );
   automationMode.textContent = config.enabled ? "Watching" : "Disabled";
   automationCadence.textContent =
     `${config.poll_seconds || 10}s poll / ${config.stable_seconds || 15}s stable` +
@@ -1004,20 +1006,29 @@ function formatTimestamp(timestampSeconds) {
 }
 
 function createAutomationJob(job) {
+  const displayStatus = job.display_status || job.status;
   const item = document.createElement("article");
-  item.className = `automation-job automation-job-${job.status}`;
+  item.className = `automation-job automation-job-${displayStatus}`;
 
   const title = document.createElement("h3");
   title.textContent =
-    job.status === "success"
+    displayStatus === "success"
       ? `${job.filename} -> ${job.output_filename}`
-      : `${job.filename} failed`;
+      : displayStatus === "requeued"
+        ? `${job.filename} queued for reprocessing`
+        : displayStatus === "resolved"
+          ? `${job.filename} previous failure resolved`
+          : `${job.filename} failed`;
 
   const detail = document.createElement("p");
   const elapsed =
     typeof job.elapsed_seconds === "number" ? ` ${job.elapsed_seconds.toFixed(2)}s.` : "";
   detail.textContent =
-    job.status === "failed" ? `${failureSummary(job)}${elapsed}` : `${job.message || "No details."}${elapsed}`;
+    displayStatus === "failed"
+      ? `${failureSummary(job)}${elapsed}`
+      : displayStatus === "resolved"
+        ? "Resolved by a later successful run."
+        : `${job.message || "No details."}${elapsed}`;
 
   item.append(title, detail);
   const validationOutcome = job.epubcheck && job.epubcheck.validation_outcome;
@@ -1041,35 +1052,58 @@ function createAutomationJob(job) {
     }
     item.append(repairs);
   }
-  if (job.diagnostic) {
+  if (displayStatus === "failed" && job.diagnostic) {
     item.append(createFailureDetails(job.diagnostic));
   }
-  if (job.status === "failed") {
-    item.append(createReprocessButton(job.filename));
+  if (displayStatus === "failed" && job.reprocessable) {
+    item.append(createReprocessButton(job.failed_filename || job.filename));
   }
   return item;
 }
 
 function createReprocessButton(filename) {
+  const control = document.createElement("div");
+  control.className = "reprocess-control";
   const button = document.createElement("button");
   button.className = "details-toggle";
   button.type = "button";
   button.textContent = "Reprocess";
   button.addEventListener("click", async () => {
+    control.querySelector(".reprocess-error")?.remove();
     button.disabled = true;
-    const response = await fetch("/automation/reprocess", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ filename }),
-    });
-    if (!response.ok) {
-      button.textContent = "Unavailable";
-      return;
+    button.textContent = "Queuing…";
+    try {
+      const response = await fetch("/automation/reprocess", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename }),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        const error = document.createElement("p");
+        error.className = "reprocess-error";
+        error.textContent = payload.detail || "Could not queue this EPUB for reprocessing.";
+        control.append(error);
+        button.disabled = response.status === 404;
+        button.textContent = response.status === 404 ? "Unavailable" : "Try again";
+        if (response.status === 404) {
+          window.setTimeout(loadAutomation, 1500);
+        }
+        return;
+      }
+      const data = await response.json();
+      renderAutomation(data.status);
+    } catch (_error) {
+      const error = document.createElement("p");
+      error.className = "reprocess-error";
+      error.textContent = "Could not contact the optimizer. Check the connection and try again.";
+      control.append(error);
+      button.disabled = false;
+      button.textContent = "Try again";
     }
-    const data = await response.json();
-    renderAutomation(data.status);
   });
-  return button;
+  control.append(button);
+  return control;
 }
 
 function failureSummary(job) {

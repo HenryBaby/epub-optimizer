@@ -7,7 +7,7 @@ import shutil
 import sqlite3
 import time
 from contextlib import suppress
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -49,6 +49,7 @@ class AutomationJob:
     diagnostic: FailureDiagnostic | None = None
     epubcheck: dict[str, Any] | None = None
     repair_actions: list[str] | None = None
+    failed_filename: str | None = None
 
 
 class AutomationManager:
@@ -146,6 +147,11 @@ class AutomationManager:
                 raise FileNotFoundError(safe_name)
             target_path = _unique_path(paths["watch"], safe_name)
             shutil.move(str(failed_path), target_path)
+            try:
+                self._mark_failed_history_requeued(safe_name, target_path)
+            except Exception:
+                shutil.move(str(target_path), failed_path)
+                raise
             with suppress(FileNotFoundError):
                 _failure_report_path(failed_path).unlink()
             return {
@@ -197,7 +203,7 @@ class AutomationManager:
                 ),
             },
             "current_job": asdict(self.current_job) if self.current_job else None,
-            "history": [asdict(job) for job in self.history],
+            "history": self._history_status_payloads(paths["failed"]),
             "last_scan_at": self.last_scan_at,
             "running": self._task is not None and not self._task.done(),
         }
@@ -205,9 +211,10 @@ class AutomationManager:
     async def _run(self) -> None:
         while not self._stop_event.is_set():
             try:
-                await asyncio.to_thread(self._cleanup_retained_files)
-                if self.config.enabled:
-                    await asyncio.to_thread(self._scan_once)
+                async with self._lock:
+                    await asyncio.to_thread(self._cleanup_retained_files)
+                    if self.config.enabled:
+                        await asyncio.to_thread(self._scan_once)
                 await asyncio.wait_for(
                     self._stop_event.wait(),
                     timeout=max(self.config.poll_seconds, 1),
@@ -312,6 +319,7 @@ class AutomationManager:
                     updated_at=time.time(),
                     diagnostic=diagnostic,
                     epubcheck=None,
+                    failed_filename=failed_path.name,
                 )
             )
             _write_failure_report(failed_path, diagnostic)
@@ -457,6 +465,76 @@ class AutomationManager:
             )
             connection.commit()
 
+    def _history_status_payloads(self, failed_dir: Path) -> list[dict[str, Any]]:
+        successful_filenames: set[str] = set()
+        payloads = []
+        for job in self.history:
+            display_status = job.status
+            if (
+                job.status in {"failed", "requeued"}
+                and _retained_failed_filename(job) in successful_filenames
+            ):
+                display_status = "resolved"
+            payloads.append(
+                {
+                    **asdict(job),
+                    "display_status": display_status,
+                    "reprocessable": (
+                        display_status == "failed"
+                        and (failed_dir / _retained_failed_filename(job)).is_file()
+                    ),
+                }
+            )
+            if job.status == "success":
+                successful_filenames.add(job.filename)
+        return payloads
+
+    def _mark_failed_history_requeued(self, failed_filename: str, watch_path: Path) -> None:
+        updated_at = time.time()
+        updated_job: AutomationJob | None = None
+        updated_index: int | None = None
+        for index, job in enumerate(self.history):
+            if _retained_failed_filename(job) == failed_filename and job.status == "failed":
+                updated_job = replace(
+                    job,
+                    status="requeued",
+                    message=f"Queued for reprocessing: {watch_path.as_posix()}",
+                    updated_at=updated_at,
+                )
+                updated_index = index
+                break
+        if updated_job is None:
+            return
+
+        self._init_history_db()
+        with sqlite3.connect(self.history_db_path) as connection:
+            rows = connection.execute(
+                "SELECT id, payload FROM jobs ORDER BY updated_at DESC, id DESC"
+            ).fetchall()
+            for row_id, raw_payload in rows:
+                try:
+                    payload = json.loads(raw_payload)
+                except json.JSONDecodeError:
+                    continue
+                payload_job = _history_jobs_from_payloads([payload])
+                if (
+                    not payload_job
+                    or payload_job[0].status != "failed"
+                    or _retained_failed_filename(payload_job[0]) != failed_filename
+                ):
+                    continue
+                connection.execute(
+                    "UPDATE jobs SET updated_at = ?, payload = ? WHERE id = ?",
+                    (updated_at, json.dumps(asdict(updated_job), ensure_ascii=False), row_id),
+                )
+                connection.commit()
+                if updated_index is not None:
+                    self.history[updated_index] = updated_job
+                return
+        raise sqlite3.DatabaseError(
+            f"Failed automation history entry was not found for {failed_filename}."
+        )
+
     def _clear_history_db(self) -> None:
         self._init_history_db()
         with sqlite3.connect(self.history_db_path) as connection:
@@ -487,6 +565,10 @@ def _history_jobs_from_payloads(data: list[object]) -> list[AutomationJob]:
     jobs = []
     for item in data:
         if isinstance(item, dict):
+            diagnostic = _load_diagnostic(item.get("diagnostic"))
+            failed_filename = _optional_str(item.get("failed_filename"))
+            if failed_filename is None and diagnostic and diagnostic.failed_path:
+                failed_filename = Path(diagnostic.failed_path).name
             jobs.append(
                 AutomationJob(
                     filename=str(item.get("filename", "")),
@@ -495,7 +577,7 @@ def _history_jobs_from_payloads(data: list[object]) -> list[AutomationJob]:
                     output_filename=item.get("output_filename"),
                     elapsed_seconds=item.get("elapsed_seconds"),
                     updated_at=float(item.get("updated_at", time.time())),
-                    diagnostic=_load_diagnostic(item.get("diagnostic")),
+                    diagnostic=diagnostic,
                     epubcheck=(
                         item.get("epubcheck")
                         if isinstance(item.get("epubcheck"), dict)
@@ -506,9 +588,14 @@ def _history_jobs_from_payloads(data: list[object]) -> list[AutomationJob]:
                         if isinstance(item.get("repair_actions"), list)
                         else None
                     ),
+                    failed_filename=failed_filename,
                 )
             )
     return jobs
+
+
+def _retained_failed_filename(job: AutomationJob) -> str:
+    return job.failed_filename or job.filename
 
 
 def _bounded_int(value: object, *, minimum: int, maximum: int, fallback: int) -> int:

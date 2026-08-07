@@ -1180,6 +1180,19 @@ button:disabled {
   color: var(--green);
 }
 
+.automation-job-resolved h3 {
+  color: var(--green);
+}
+
+.automation-job-requeued h3 {
+  color: var(--blue);
+}
+
+.reprocess-error {
+  margin: 0.5rem 0 0;
+  color: var(--danger);
+}
+
 .automation-job-failed h3 {
   color: var(--danger);
 }

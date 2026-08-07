@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.3 - 2026-08-07
+
+### Fixed
+
+- Make failed-job reprocessing a clear single-click action with immediate
+  queuing feedback.
+- Mark the matching failure history entry as requeued and remove its stale
+  action button while retaining the prior attempt for audit history.
+- Show Reprocess only when the retained failed EPUB is still available.
+
 ## 1.2.2 - 2026-08-07
 
 ### Fixed

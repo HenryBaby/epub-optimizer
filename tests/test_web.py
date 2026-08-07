@@ -34,9 +34,9 @@ def test_homepage_renders() -> None:
 
     assert response.status_code == 200
     assert "EPUB Optimizer" in response.text
-    assert "v1.2.2" in response.text
-    assert 'href="/static/favicon.png?v=1.2.2"' in response.text
-    assert 'href="/static/styles.css?v=1.2.2"' in response.text
+    assert "v1.2.3" in response.text
+    assert 'href="/static/favicon.png?v=1.2.3"' in response.text
+    assert 'href="/static/styles.css?v=1.2.3"' in response.text
     assert 'id="optimizer-form"' in response.text
     assert 'name="files"' in response.text
     assert 'id="source-picker"' in response.text
@@ -62,7 +62,7 @@ def test_homepage_renders() -> None:
     assert 'id="pipeline-last-scan"' in response.text
     assert 'id="pipeline-next-scan"' in response.text
     assert 'id="automation-scan-state"' in response.text
-    assert 'src="/static/app.js?v=1.2.2"' in response.text
+    assert 'src="/static/app.js?v=1.2.3"' in response.text
 
 
 def test_automation_status_and_configuration() -> None:
@@ -114,7 +114,7 @@ def test_health_endpoint_reports_service_status() -> None:
     assert response.status_code == 200
     assert response.json() == {
         "status": "ok",
-        "version": "1.2.2",
+        "version": "1.2.3",
         "automation_running": False,
         "automation_enabled": False,
     }
@@ -147,11 +147,23 @@ def test_failed_automation_file_can_be_reprocessed() -> None:
     manager._ensure_directories()
     failed_source = manager.failed_dir / "Retry.epub"
     failed_source.write_bytes(b"epub")
+    manager._record(
+        AutomationJob(
+            filename="Retry.epub",
+            status="failed",
+            message="Previous failure.",
+            output_filename=None,
+            elapsed_seconds=1.0,
+            updated_at=1.0,
+        )
+    )
 
     response = client.post("/automation/reprocess", json={"filename": "Retry.epub"})
 
     assert response.status_code == 200
     assert response.json()["reprocessed"]["filename"] == "Retry.epub"
+    assert response.json()["status"]["history"][0]["status"] == "requeued"
+    assert response.json()["status"]["history"][0]["reprocessable"] is False
     assert not failed_source.exists()
     assert (manager.watch_dir / "Retry.epub").read_bytes() == b"epub"
 
