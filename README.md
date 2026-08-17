@@ -111,8 +111,7 @@ ghcr.io/henrybaby/epub-optimizer:latest
 
 ## Development
 
-Development dependencies are installed in the repository's development image;
-nothing project-specific needs to be installed in the code-server container.
+Development dependencies are installed in the repository's development image.
 The development Compose project uses the `epub-optimizer-dev` project name,
 the repository-owned `epub-optimizer-dev:local` image, and a `dev_data` volume.
 It publishes the live-reload server on port 14200 so it does not conflict with
