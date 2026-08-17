@@ -1,0 +1,26 @@
+name: epub-optimizer-dev
+
+services:
+  dev:
+    build:
+      context: .
+      target: development
+    image: epub-optimizer-dev:local
+    ports:
+      - "14200:4200"
+    environment:
+      EPUB_OPTIMIZER_MAX_UPLOAD_MB: "100"
+    volumes:
+      - .:/app
+      - dev_data:/data
+    command:
+      - uvicorn
+      - epub_optimizer.web:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "4200"
+      - --reload
+
+volumes:
+  dev_data:

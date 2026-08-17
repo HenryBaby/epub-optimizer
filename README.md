@@ -111,11 +111,38 @@ ghcr.io/henrybaby/epub-optimizer:latest
 
 ## Development
 
-```powershell
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-pip install -e ".[dev]"
-python -m ruff check .
-python -m pytest
-uvicorn epub_optimizer.web:app --reload --port 4200
+Development dependencies are installed in the repository's development image;
+nothing project-specific needs to be installed in the code-server container.
+The development Compose project uses the `epub-optimizer-dev` project name,
+the repository-owned `epub-optimizer-dev:local` image, and a `dev_data` volume.
+It publishes the live-reload server on port 14200 so it does not conflict with
+the production service on port 4200.
+
+Build the development image once (and again after changing `pyproject.toml` or
+the Dockerfile):
+
+```bash
+docker compose -f docker-compose.dev.yml build
+```
+
+Start the live-reload development server:
+
+```bash
+docker compose -f docker-compose.dev.yml up
+```
+
+Open <http://localhost:14200>. Source files are bind-mounted into the
+container, so changes are picked up by Uvicorn without rebuilding the image.
+
+Run lint and the test suite in the development container:
+
+```bash
+docker compose -f docker-compose.dev.yml run --rm dev ruff check .
+docker compose -f docker-compose.dev.yml run --rm dev pytest
+```
+
+Stop the development service with:
+
+```bash
+docker compose -f docker-compose.dev.yml down
 ```
