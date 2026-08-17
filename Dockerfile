@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.12-slim AS production
 
 ARG EPUBCHECK_VERSION=5.3.0
 ARG EPUBCHECK_SHA256=6C07E68584B2E2CE2F89FE06E1246DFEAD3EB36B46B340E7D93524F29DCFF6C5
@@ -40,3 +40,15 @@ EXPOSE 4200
 HEALTHCHECK --interval=30s --timeout=5s CMD java -version >/dev/null 2>&1 && test -f /opt/epubcheck/epubcheck.jar
 
 CMD ["uvicorn", "epub_optimizer.web:app", "--host", "0.0.0.0", "--port", "4200"]
+
+# Development keeps the production image's Python, Java, and EPUBCheck setup,
+# then adds only the repository's optional development dependencies.
+FROM production AS development
+
+USER root
+RUN pip install --no-cache-dir -e ".[dev]"
+USER appuser
+
+# Keep the Dockerfile's default target production-compatible for existing
+# Compose files and CI jobs that do not specify a build target.
+FROM production AS runtime
