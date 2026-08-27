@@ -1927,14 +1927,15 @@ _BODY_FLOW_ELEMENTS = {
 
 
 def _normalize_direct_body_content(root: etree._Element) -> None:
-    """Wrap body-level phrasing content in paragraphs required by XHTML."""
-    for body in root.xpath("//*[local-name()='body']"):
-        children = list(body)
-        if not children and not (body.text or "").strip():
+    """Wrap direct phrasing content in body and blockquote flow containers."""
+    containers = root.xpath("//*[local-name()='body' or local-name()='blockquote']")
+    for container in containers:
+        children = list(container)
+        if not children and not (container.text or "").strip():
             continue
 
-        run_text = body.text
-        body.text = None
+        run_text = container.text
+        container.text = None
         run_children: list[etree._Element] = []
         previous_flow: etree._Element | None = None
         insertion_index = 0
@@ -1946,13 +1947,13 @@ def _normalize_direct_body_content(root: etree._Element) -> None:
                 paragraph.text = run_text
                 for child in run_children:
                     paragraph.append(child)
-                body.insert(insertion_index, paragraph)
+                container.insert(insertion_index, paragraph)
                 insertion_index += 1
             elif run_text:
                 if previous_flow is not None:
                     previous_flow.tail = run_text
                 else:
-                    body.text = run_text
+                    container.text = run_text
             run_text = None
             run_children = []
 
@@ -1963,7 +1964,7 @@ def _normalize_direct_body_content(root: etree._Element) -> None:
                 # The original child list is still valid, but insertion of a
                 # paragraph shifts its current index. Locate the flow node by
                 # identity so ordering remains unchanged.
-                current_index = body.index(child)
+                current_index = container.index(child)
                 insertion_index = current_index + 1
                 previous_flow = child
                 run_text = child.tail
@@ -1973,7 +1974,7 @@ def _normalize_direct_body_content(root: etree._Element) -> None:
             if run_text is None:
                 run_text = ""
             run_children.append(child)
-            body.remove(child)
+            container.remove(child)
 
         flush_run()
 

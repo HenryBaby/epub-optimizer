@@ -153,6 +153,25 @@ def test_direct_body_font_unwraps_emphasis_into_valid_paragraph() -> None:
     assert body[1][0].tag == "{http://www.w3.org/1999/xhtml}em"
 
 
+def test_blockquote_italic_span_is_wrapped_in_a_valid_paragraph() -> None:
+    root = etree.fromstring(
+        b'<html xmlns="http://www.w3.org/1999/xhtml"><body>'
+        b'<blockquote id="filepos3777" class="calibre11">'
+        b'<span class="italic">To Kim</span><div/></blockquote>'
+        b'</body></html>'
+    )
+
+    _normalize_inline_spans(root)
+    _normalize_direct_body_content(root)
+
+    blockquote = root.xpath("//*[local-name()='blockquote']")[0]
+    assert [etree.QName(child).localname for child in blockquote] == ["p", "div"]
+    assert etree.tostring(blockquote, encoding="unicode") == (
+        '<blockquote xmlns="http://www.w3.org/1999/xhtml" id="filepos3777" '
+        'class="calibre11"><p><em>To Kim</em></p><div/></blockquote>'
+    )
+
+
 def test_optimize_records_unavailable_epubcheck(tmp_path: Path) -> None:
     source = tmp_path / "book.epub"
     _write_minimal_epub(source)

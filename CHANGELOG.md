@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.5 - 2026-08-27
+
+### Fixed
+
+- Wrap inline content directly inside blockquotes so normalization cannot
+  introduce invalid XHTML or EPUBCheck RSC-005 errors.
+
 ## 1.2.4 - 2026-08-27
 
 ### Fixed
