@@ -7,9 +7,12 @@ import pytest
 from lxml import etree
 
 from epub_optimizer.core import (
+    _normalize_direct_body_content,
+    _normalize_inline_spans,
     _publish_output,
     _remove_deleted_encryption_entries,
     _remove_empty_blocks,
+    _unwrap_font_elements,
     optimize_epub,
     preview_epub_changes,
     validate_epub_details,
@@ -106,6 +109,48 @@ def test_empty_block_cleanup_keeps_the_only_body_flow_element() -> None:
     _remove_empty_blocks(root)
 
     assert len(root.xpath("//*[local-name()='body']/*")) == 1
+
+
+def test_direct_body_italic_span_is_wrapped_around_block_siblings() -> None:
+    root = etree.fromstring(
+        b'<html xmlns="http://www.w3.org/1999/xhtml"><body>'
+        b'Before <span class="italic">emphasis</span> after'
+        b'<div>Block</div>tail <span class="italic">again</span>'
+        b'</body></html>'
+    )
+
+    _normalize_inline_spans(root)
+    _normalize_direct_body_content(root)
+
+    body = root.xpath("//*[local-name()='body']")[0]
+    assert [etree.QName(child).localname for child in body] == ["p", "div", "p"]
+    assert etree.tostring(body, encoding="unicode") == (
+        '<body xmlns="http://www.w3.org/1999/xhtml">'
+        '<p>Before <em>emphasis</em> after</p>'
+        '<div>Block</div>'
+        '<p>tail <em>again</em></p>'
+        '</body>'
+    )
+
+
+def test_direct_body_font_unwraps_emphasis_into_valid_paragraph() -> None:
+    root = etree.fromstring(
+        b'<html xmlns="http://www.w3.org/1999/xhtml"><body>'
+        b'<p>First</p>between<font><em>emphasis</em></font>after<p>Last</p>'
+        b'</body></html>'
+    )
+
+    _unwrap_font_elements(root)
+    _normalize_direct_body_content(root)
+
+    body = root.xpath("//*[local-name()='body']")[0]
+    assert [etree.QName(child).localname for child in body] == ["p", "p", "p"]
+    assert ["".join(child.itertext()) for child in body] == [
+        "First",
+        "betweenemphasisafter",
+        "Last",
+    ]
+    assert body[1][0].tag == "{http://www.w3.org/1999/xhtml}em"
 
 
 def test_optimize_records_unavailable_epubcheck(tmp_path: Path) -> None:

@@ -1296,6 +1296,7 @@ def _process_content_document(
     _remove_broken_images(root, content_file, work_dir)
     _unwrap_font_elements(root)
     _normalize_inline_spans(root)
+    _normalize_direct_body_content(root)
     _repair_duplicate_ids(root)
     _collapse_nested_blockquotes(root)
     _remove_empty_blocks(root)
@@ -1898,6 +1899,83 @@ def _normalize_inline_spans(root: etree._Element) -> None:
             _replace_classes(span, "eo-smallcaps")
         else:
             span.attrib.pop("class", None)
+
+
+_BODY_FLOW_ELEMENTS = {
+    "address",
+    "blockquote",
+    "del",
+    "div",
+    "dl",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "hr",
+    "ins",
+    "noscript",
+    "ol",
+    "p",
+    "pre",
+    "script",
+    "table",
+    "ul",
+    "svg",
+}
+
+
+def _normalize_direct_body_content(root: etree._Element) -> None:
+    """Wrap body-level phrasing content in paragraphs required by XHTML."""
+    for body in root.xpath("//*[local-name()='body']"):
+        children = list(body)
+        if not children and not (body.text or "").strip():
+            continue
+
+        run_text = body.text
+        body.text = None
+        run_children: list[etree._Element] = []
+        previous_flow: etree._Element | None = None
+        insertion_index = 0
+
+        def flush_run() -> None:
+            nonlocal run_text, run_children, insertion_index
+            if run_children or (run_text and run_text.strip()):
+                paragraph = etree.Element(f"{{{XHTML_NS}}}p")
+                paragraph.text = run_text
+                for child in run_children:
+                    paragraph.append(child)
+                body.insert(insertion_index, paragraph)
+                insertion_index += 1
+            elif run_text:
+                if previous_flow is not None:
+                    previous_flow.tail = run_text
+                else:
+                    body.text = run_text
+            run_text = None
+            run_children = []
+
+        for child in children:
+            local = _local_name(child)
+            if local in _BODY_FLOW_ELEMENTS:
+                flush_run()
+                # The original child list is still valid, but insertion of a
+                # paragraph shifts its current index. Locate the flow node by
+                # identity so ordering remains unchanged.
+                current_index = body.index(child)
+                insertion_index = current_index + 1
+                previous_flow = child
+                run_text = child.tail
+                child.tail = None
+                continue
+
+            if run_text is None:
+                run_text = ""
+            run_children.append(child)
+            body.remove(child)
+
+        flush_run()
 
 
 def _repair_duplicate_ids(root: etree._Element) -> None:
