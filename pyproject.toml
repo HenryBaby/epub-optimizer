@@ -1,6 +1,6 @@
 [project]
 name = "epub-optimizer"
-version = "1.2.3"
+version = "1.2.4"
 description = "A small local web app for normalizing EPUB typography into a stable house style."
 readme = "README.md"
 license = "AGPL-3.0-only"

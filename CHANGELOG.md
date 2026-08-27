@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.4 - 2026-08-27
+
+### Fixed
+
+- Prevent normalization from creating invalid direct-body inline elements such
+  as `<em>` in XHTML content documents.
+
 ## 1.2.3 - 2026-08-07
 
 ### Fixed
