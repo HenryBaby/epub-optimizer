@@ -890,6 +890,21 @@ def test_optimize_part_pages_images_empty_blocks_and_ncx(tmp_path: Path) -> None
     assert 'playOrder="1"' in ncx
 
 
+def test_optimize_normalizes_mixed_ncx_target_play_orders(tmp_path: Path) -> None:
+    source = tmp_path / "mixed-ncx-targets.epub"
+    _write_mixed_ncx_targets_epub(source)
+
+    result = optimize_epub(source, tmp_path / "out-mixed-ncx-targets")
+
+    with zipfile.ZipFile(result.output_path) as archive:
+        ncx = etree.fromstring(archive.read("toc.ncx"))
+
+    targets = ncx.xpath(
+        "//*[local-name()='navPoint' or local-name()='navTarget' or local-name()='pageTarget']"
+    )
+    assert [target.attrib["playOrder"] for target in targets] == ["1", "2", "1", "3", "2"]
+
+
 def test_optimize_preserves_svg_cover_sizing(tmp_path: Path) -> None:
     source = tmp_path / "svg-cover.epub"
     _write_svg_cover_epub(source)
@@ -2392,6 +2407,76 @@ def _write_structure_cleanup_epub(path: Path) -> None:
       <navLabel><text>Unsafe</text></navLabel>
       <content src="javascript:alert(1)"/>
     </navPoint>
+  </navMap>
+</ncx>
+""",
+        )
+
+
+def _write_mixed_ncx_targets_epub(path: Path) -> None:
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("mimetype", "application/epub+zip", compress_type=zipfile.ZIP_STORED)
+        archive.writestr(
+            "META-INF/container.xml",
+            """<?xml version="1.0"?>
+<container version="1.0"
+    xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="content.opf"
+      media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>
+""",
+        )
+        archive.writestr(
+            "content.opf",
+            """<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="id"
+  version="2.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="id">urn:test-mixed</dc:identifier>
+    <dc:title>Mixed</dc:title><dc:language>en</dc:language>
+  </metadata>
+  <manifest>
+    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+    <item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine toc="ncx"><itemref idref="chapter"/></spine>
+</package>
+""",
+        )
+        archive.writestr(
+            "chapter.xhtml",
+            """<?xml version="1.0"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head><title>Mixed</title></head><body><p>Text</p></body>
+</html>""",
+        )
+        archive.writestr(
+            "toc.ncx",
+            """<?xml version="1.0" encoding="utf-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+  <head/><docTitle><text>Mixed</text></docTitle><navMap>
+    <navPoint id="nav1" playOrder="40">
+      <navLabel><text>Chapter</text></navLabel>
+      <content src="chapter.xhtml"/>
+    </navPoint>
+    <navTarget id="nav2" playOrder="7">
+      <navLabel><text>Same</text></navLabel>
+      <content src="chapter.xhtml#part"/>
+    </navTarget>
+    <pageTarget id="page1" playOrder="7">
+      <navLabel><text>Duplicate</text></navLabel>
+      <content src="chapter.xhtml"/>
+    </pageTarget>
+    <pageTarget id="page2" playOrder="99">
+      <navLabel><text>Other</text></navLabel>
+      <content src="chapter.xhtml#other"/>
+    </pageTarget>
+    <navTarget id="nav3" playOrder="99">
+      <navLabel><text>Same</text></navLabel>
+      <content src="chapter.xhtml#part"/>
+    </navTarget>
   </navMap>
 </ncx>
 """,

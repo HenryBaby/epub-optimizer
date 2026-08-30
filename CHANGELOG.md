@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.6 - 2026-08-30
+
+### Fixed
+
+- Normalize NCX `playOrder` values across `navPoint`, `navTarget`, and
+  `pageTarget` elements to prevent introduced EPUBCheck RSC-005 errors.
+
 ## 1.2.5 - 2026-08-27
 
 ### Fixed

@@ -1455,10 +1455,26 @@ def _normalize_ncx_document(nav_file: Path, work_dir: Path, nav_dir: str) -> boo
                 label.text = normalized
                 changed = True
 
-    for index, nav_point in enumerate(root.xpath("//*[local-name()='navPoint']"), start=1):
-        new_order = str(index)
-        if nav_point.attrib.get("playOrder") != new_order:
-            nav_point.attrib["playOrder"] = new_order
+    # NCX playOrder is a sequence shared by all navigation target types.  A
+    # source may contain navPoint, navTarget, and pageTarget elements together,
+    # and repeated references to one content target must use the same order.
+    target_elements = root.xpath(
+        "//*[local-name()='navPoint' or local-name()='navTarget' or local-name()='pageTarget']"
+    )
+    target_orders: dict[tuple[str, str | int], str] = {}
+    next_order = 1
+    for target in target_elements:
+        content = _first_xpath(target, "./*[local-name()='content']")
+        src = content.attrib.get("src") if content is not None else None
+        # Missing src cannot establish identity, so each such element gets its
+        # own order rather than accidentally sharing one with another element.
+        identity = ("src", src) if src else ("missing", id(target))
+        if identity not in target_orders:
+            target_orders[identity] = str(next_order)
+            next_order += 1
+        new_order = target_orders[identity]
+        if target.attrib.get("playOrder") != new_order:
+            target.attrib["playOrder"] = new_order
             changed = True
 
     if changed:

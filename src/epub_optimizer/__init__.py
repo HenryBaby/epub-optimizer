@@ -2,6 +2,6 @@
 
 from epub_optimizer.core import OptimizationResult, optimize_epub
 
-__version__ = "1.2.5"
+__version__ = "1.2.6"
 
 __all__ = ["OptimizationResult", "__version__", "optimize_epub"]
