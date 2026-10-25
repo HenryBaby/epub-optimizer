@@ -1917,29 +1917,44 @@ def _normalize_inline_spans(root: etree._Element) -> None:
             span.attrib.pop("class", None)
 
 
-_BODY_FLOW_ELEMENTS = {
+# Non-phrasing flow elements from both XHTML 1.1 and EPUB 3's HTML vocabulary.
+# Keep this shared with block-child detection so a containing div cannot later
+# be mistaken for a paragraph or heading.
+_BLOCK_FLOW_ELEMENTS = {
     "address",
+    "article",
+    "aside",
     "blockquote",
-    "del",
+    "details",
+    "dialog",
     "div",
     "dl",
+    "fieldset",
+    "figure",
+    "footer",
+    "form",
     "h1",
     "h2",
     "h3",
     "h4",
     "h5",
     "h6",
+    "header",
+    "hgroup",
     "hr",
-    "ins",
-    "noscript",
+    "main",
+    "menu",
+    "nav",
     "ol",
     "p",
     "pre",
-    "script",
+    "search",
+    "section",
     "table",
     "ul",
-    "svg",
 }
+
+_BODY_FLOW_ELEMENTS = _BLOCK_FLOW_ELEMENTS | {"del", "ins", "noscript", "script", "svg"}
 
 
 def _normalize_direct_body_content(root: etree._Element) -> None:
@@ -2227,7 +2242,7 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
                     "eo-section",
                     "eo-title-main",
                     "eo-toc-heading",
-                }:
+                } and not _has_block_children(element):
                     _rename_element(element, "h1")
                     _replace_classes(element, role)
                     after_boundary = True
@@ -2269,7 +2284,7 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
                 after_boundary,
             )
             if role:
-                if role == "eo-front":
+                if role == "eo-front" and not _has_block_children(element):
                     _rename_element(element, "h1")
                     _replace_classes(element, role)
                     after_boundary = True
@@ -2286,7 +2301,7 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
         if local == "div" and document_role == "works":
             role = _works_list_div_role(element, after_boundary)
             if role:
-                if role == "eo-front":
+                if role == "eo-front" and not _has_block_children(element):
                     _rename_element(element, "h1")
                     _replace_classes(element, role)
                     after_boundary = True
@@ -2329,7 +2344,7 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
                 after_boundary = True
                 continue
             title_line_index += 1
-            if role == "eo-title-main":
+            if role == "eo-title-main" and not _has_block_children(element):
                 _rename_element(element, "h1")
                 _replace_classes(element, role)
                 after_boundary = True
@@ -2358,7 +2373,7 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
                 continue
 
             if role:
-                if role == "eo-toc-heading":
+                if role == "eo-toc-heading" and not _has_block_children(element):
                     _rename_element(element, "h1")
                     _replace_classes(element, role)
                     after_boundary = True
@@ -2837,23 +2852,7 @@ def _works_list_item_role(element: etree._Element, after_boundary: bool) -> str:
 
 
 def _has_block_children(element: etree._Element) -> bool:
-    block_names = {
-        "blockquote",
-        "div",
-        "figure",
-        "h1",
-        "h2",
-        "h3",
-        "h4",
-        "h5",
-        "h6",
-        "ol",
-        "p",
-        "section",
-        "table",
-        "ul",
-    }
-    return any(_local_name(child) in block_names for child in element)
+    return any(_local_name(child) in _BLOCK_FLOW_ELEMENTS for child in element)
 
 
 def _contains_emphasis(element: etree._Element) -> bool:
