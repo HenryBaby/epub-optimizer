@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.7 - 2026-10-25
+
+### Fixed
+
+- Preserve EPUB 3 navigation and structural containers during normalization.
+- Prevent paragraphs and headings from wrapping block content, avoiding
+  invalid XHTML and introduced EPUBCheck RSC-005 errors.
+
 ## 1.2.6 - 2026-08-30
 
 ### Fixed
