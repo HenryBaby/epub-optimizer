@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.2.8 - 2026-10-29
+
+### Fixed
+
+- Preserve anchor-only empty elements during cleanup and retain their wrapper
+  chains so referenced OPF fragments are not lost.
+- Preserve legacy centered block markup and remove known Amazon conversion
+  attributes.
+
 ## 1.2.7 - 2026-10-25
 
 ### Fixed

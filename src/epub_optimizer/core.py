@@ -1747,7 +1747,11 @@ def _remove_broken_images(root: etree._Element, content_file: Path, work_dir: Pa
     image_containers = "//*[local-name()='p' or local-name()='div' or local-name()='figure']"
     for element in list(root.xpath(image_containers)):
         classes = set(element.attrib.get("class", "").lower().split())
-        if classes & {"eo-image", "image", "img", "dis_img", "cover"} and _is_empty_block(element):
+        if (
+            classes & {"eo-image", "image", "img", "dis_img", "cover"}
+            and _is_empty_block(element)
+            and not _has_fragment_targets(element)
+        ):
             _remove_element_preserving_tail(element)
 
 
@@ -1767,13 +1771,23 @@ def _resolve_content_asset_path(content_file: Path, work_dir: Path, href: str) -
     return candidate
 
 
+def _has_fragment_targets(element: etree._Element) -> bool:
+    """Keep targets even when their surrounding block has no visible content."""
+    return any(
+        node.get(attr)
+        for node in element.iter()
+        if isinstance(node.tag, str)
+        for attr in ("id", "name", "{http://www.w3.org/XML/1998/namespace}id")
+    )
+
+
 def _remove_empty_blocks(root: etree._Element) -> None:
     removable_names = {"div", "p", "section"}
     empty_blocks = "//*[local-name()='div' or local-name()='p' or local-name()='section']"
     for element in list(root.xpath(empty_blocks)):
         if etree.QName(element).localname.lower() not in removable_names:
             continue
-        if not _is_empty_block(element):
+        if not _is_empty_block(element) or _has_fragment_targets(element):
             continue
         classes = set(element.attrib.get("class", "").lower().split())
         if classes & {"scene-break", "scenebreak", "separator", "ornament", "space-break"}:
@@ -1811,6 +1825,13 @@ def _strip_publisher_presentation(root: etree._Element) -> None:
         local_element = _local_name(element)
         for attr in list(element.attrib):
             local_attr = attr.rsplit("}", 1)[-1].lower()
+            if (
+                etree.QName(element).namespace in {None, XHTML_NS}
+                and not attr.startswith("{")
+                and local_attr in {"data-amznremoved", "data-amznremoved-m8"}
+            ):
+                del element.attrib[attr]
+                continue
             if local_element in {"svg", "image"} and local_attr in {"height", "width"}:
                 continue
             if local_attr in PRESENTATION_ATTRS:
@@ -1848,6 +1869,11 @@ def _collapse_nested_blockquotes(root: etree._Element) -> None:
     while changed:
         changed = False
         for element in list(root.xpath("//*[local-name()='blockquote']")):
+            if any(
+                element.get(attr)
+                for attr in ("id", "name", "{http://www.w3.org/XML/1998/namespace}id")
+            ):
+                continue
             children = [child for child in element if isinstance(child.tag, str)]
             if len(children) != 1:
                 continue
@@ -1869,6 +1895,20 @@ def _collapse_nested_blockquotes(root: etree._Element) -> None:
 
 def _unwrap_font_elements(root: etree._Element) -> None:
     for element in list(root.xpath("//*[local-name()='font']")):
+        if any(
+            element.get(attr)
+            for attr in ("id", "name", "{http://www.w3.org/XML/1998/namespace}id")
+        ):
+            wrapper = (
+                "div"
+                if any(
+                    _local_name(child) in _BLOCK_FLOW_ELEMENTS
+                    for child in element.iterdescendants()
+                )
+                else "span"
+            )
+            _rename_element(element, wrapper)
+            continue
         parent = element.getparent()
         if parent is None:
             continue
@@ -1925,6 +1965,8 @@ _BLOCK_FLOW_ELEMENTS = {
     "article",
     "aside",
     "blockquote",
+    # Legacy block vocabulary must not become a child of a generated paragraph.
+    "center",
     "details",
     "dialog",
     "div",
