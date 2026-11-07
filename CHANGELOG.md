@@ -1,5 +1,25 @@
 # Changelog
 
+> Release dates below are the dates of the tagged commits. These historical
+> entries were backfilled; they do not establish exact publication times.
+
+## Unreleased — 1.3.0 (dev testing)
+
+This version is under development and is not a stable release.
+
+### Added
+
+- Add manual Grimmory library discovery for mapped folders and full-folder
+  backups, with restore support and no automatic runs.
+- Add strict metadata preservation for library jobs while retaining exact
+  filenames and folder layouts. Folder backups exclude Grimmory's database and
+  application state.
+
+### Fixed
+
+- Recognize multi-paragraph opening epigraphs, correct stale paragraph roles,
+  and preserve the following narrative flow.
+
 ## 1.2.8 - 2026-10-29
 
 ### Fixed
@@ -32,6 +52,10 @@
   introduce invalid XHTML or EPUBCheck RSC-005 errors.
 
 ## 1.2.4 - 2026-08-27
+
+### Added
+
+- Add a dedicated development container and document its dependency setup.
 
 ### Fixed
 
@@ -72,7 +96,7 @@
 
 ### Highlights
 
-- Added an automation dashboard with watched-folder processing, persistent job
+- Expanded the automation dashboard with watched-folder processing, persistent job
   history, failed-job reprocessing, retention controls, and batch report export.
 - Added analyze, dry-run preview, validation-only, direct optimization, and
   service-health APIs.
@@ -109,3 +133,108 @@
 - EPUBCheck and runtime license provenance is documented in
   [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 - EPUB Optimizer remains licensed under AGPL-3.0-only.
+
+## 1.1.6 - 2026-07-14
+
+### Fixed
+
+- Preserve heading roles when they are reliable, and reclassify them when needed.
+- Preserve centered and right-aligned heading roles outside chapter contexts
+  while identifying chapter-level `h1` headings correctly.
+
+## 1.1.5 - 2026-07-14
+
+### Improved
+
+- Improve role classification on repeated optimization, including persisted
+  part, front-matter, section, and chapter roles.
+- Classify short metadata pages more accurately.
+
+## 1.1.4 - 2026-07-13
+
+### Fixed
+
+- Keep failure reports outside the data volume and save them under `/failed`.
+- Preserve repeat optimizer roles across processing.
+
+## 1.1.3 - 2026-07-13
+
+### Improved
+
+- Archive processed source EPUBs.
+
+## 1.1.2 - 2026-07-13
+
+### Added
+
+- Add structured failure diagnostics with stage, type, detail, and path fields
+  across manual jobs, automation history, and JSON failure reports.
+- Show expandable failure details in the interface.
+
+## 1.1.1 - 2026-07-13
+
+### Improved
+
+- Refresh the README showcase and make minor interface wording and versioned
+  asset updates.
+
+## 1.1.0 - 2026-07-13
+
+### Added
+
+- Add an API and interface action to clear automation history.
+- Document the optional failed-folder mount.
+
+## 1.0.7 - 2026-07-13
+
+### Added
+
+- Add a watched-folder automation manager with polling and file-stability
+  checks, configurable suffixes, output handling, and failure history.
+- Add watch and output mounts and a separate Automation tab.
+
+## 1.0.6 - 2026-07-13
+
+### Improved
+
+- Use relative static asset URLs and an explicit Compose volume name.
+- Update the README showcase.
+
+## 1.0.5 - 2026-07-12
+
+### Improved
+
+- Add versioned static asset URLs for cache busting.
+
+## 1.0.4 - 2026-07-12
+
+### Improved
+
+- Improve output handling, EPUB structure normalization, and drop-zone controls.
+
+## 1.0.3 - 2026-07-12
+
+### Improved
+
+- Refine folder selection usability.
+
+## 1.0.2 - 2026-07-12
+
+### Added
+
+- Add folder batch selection and set the Compose container name.
+
+## 1.0.1 - 2026-07-12
+
+### Added
+
+- Add a favicon.
+
+## 1.0.0 - 2026-07-12
+
+### Added
+
+- Record the initial release of the existing Docker web application, supporting
+  EPUB 2 and EPUB 3, house-style normalization, font cleanup, and image-byte
+  preservation.
+- Add release archive and download cleanup and image provenance labels.
