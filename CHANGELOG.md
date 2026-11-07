@@ -3,9 +3,7 @@
 > Release dates below are the dates of the tagged commits. These historical
 > entries were backfilled; they do not establish exact publication times.
 
-## Unreleased — 1.3.0 (dev testing)
-
-This version is under development and is not a stable release.
+## 1.3.0 - 2026-11-07
 
 ### Changed
 
