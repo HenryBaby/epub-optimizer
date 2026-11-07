@@ -1,9 +1,11 @@
 import asyncio
+import errno
 import hashlib
 import json
 import os
 import threading
 from types import SimpleNamespace
+from urllib.error import HTTPError
 
 import pytest
 
@@ -424,3 +426,113 @@ def test_restore_diagnostics_explain_known_snapshot_conflict(setup_library):
         assert grimmory._manifest(root) == before
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "failure, expected",
+    [
+        ("mkdir", "creating backup directory (EACCES)"),
+        ("ownership", "preserving ownership (EPERM)"),
+        ("space", "copying file and copy metadata (ENOSPC)"),
+        ("readonly", "copying file and copy metadata (EROFS)"),
+        ("unsupported", f"syncing backup directories ({errno.errorcode[errno.EOPNOTSUPP]})"),
+        ("missing", "copying file and copy metadata (ENOENT)"),
+        ("manifest", "persisting snapshot manifest (ENOSPC)"),
+        ("unexpected", None),
+        ("http", None),
+    ],
+)
+def test_backup_filesystem_diagnostics_leave_library_untouched(
+    setup_library, monkeypatch, caplog, failure, expected
+):
+    manager, root, mapping, _, _ = setup_library
+    before = grimmory._manifest(root)
+    identities = grimmory._identities(root)
+    private = "secret-token secret-pass https://private.example/?credential=private-value"
+
+    def fail(code):
+        raise OSError(code, private, private)
+
+    def no_optimizer(*args, **kwargs):
+        pytest.fail("optimizer must not run without a ready snapshot")
+
+    monkeypatch.setattr(grimmory, "optimize_epub", no_optimizer)
+    if failure in {"mkdir", "unexpected"}:
+        original = grimmory.Path.mkdir
+
+        def mkdir(path, *args, **kwargs):
+            if path == manager.backup_dir:
+                if failure == "unexpected":
+                    raise RuntimeError(private)
+                fail(errno.EACCES)
+            return original(path, *args, **kwargs)
+
+        monkeypatch.setattr(grimmory.Path, "mkdir", mkdir)
+    elif failure == "ownership":
+        original = grimmory._preserve
+
+        def preserve(path, item, **kwargs):
+            # Force an owner mismatch without requiring root or changing real ownership.
+            if manager.backup_dir in path.parents:
+                item = dict(item, uid=path.stat().st_uid + 1)
+            return original(path, item, **kwargs)
+
+        monkeypatch.setattr(grimmory, "_preserve", preserve)
+        monkeypatch.setattr(grimmory.os, "chown", lambda *args: fail(errno.EPERM))
+    elif failure == "unsupported":
+        original = grimmory._fsync_dir
+
+        def fsync_dir(path):
+            if manager.backup_dir in path.parents:
+                fail(errno.EOPNOTSUPP)
+            return original(path)
+
+        monkeypatch.setattr(grimmory, "_fsync_dir", fsync_dir)
+    elif failure == "manifest":
+        original = grimmory._json_write
+
+        def json_write(path, data):
+            if path.name == "manifest.json":
+                fail(errno.ENOSPC)
+            return original(path, data)
+
+        monkeypatch.setattr(grimmory, "_json_write", json_write)
+    else:
+        def copy(*args, **kwargs):
+            if failure == "http":
+                raise HTTPError(private, 403, private, {}, None)
+            fail({"space": errno.ENOSPC, "readonly": errno.EROFS, "missing": errno.ENOENT}[failure])
+
+        monkeypatch.setattr(grimmory.shutil, "copy2", copy)
+
+    asyncio.run(optimize_all(manager, mapping))
+    status = manager.status()
+    job = status["job"]
+    assert job["status"] == "failed"
+    assert job["results"] == []
+    assert status["snapshots"] == []
+    assert "snapshot_id" not in job
+    if expected:
+        assert job["message"].startswith("Backup failed while ")
+        assert expected in job["message"]
+        if failure == "ownership":
+            assert "source owner/group" in job["message"]
+        elif failure == "mkdir":
+            assert "backup write access" in job["message"]
+    else:
+        assert job["message"] == (
+            "Library operation stopped: backup, drift or filesystem safety check failed."
+        )
+    assert grimmory._manifest(root) == before
+    assert grimmory._identities(root) == identities
+    published = json.dumps(status) + (manager.state_dir / "state.json").read_text() + caplog.text
+    for secret in ("secret-token", "secret-pass", "private.example", "private-value"):
+        assert secret not in published
+
+
+def test_known_failure_diagnostics_redact_token(setup_library):
+    manager, _, _, _, _ = setup_library
+    manager._token = "secret-token"
+    assert manager._failure_message(
+        grimmory.GrimmoryValidationError("Cannot continue: secret-token"), "fallback"
+    ) == "Cannot continue: [redacted]"

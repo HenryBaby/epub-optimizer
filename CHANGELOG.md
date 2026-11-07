@@ -13,6 +13,8 @@
 
 ### Fixed
 
+- Explain Grimmory backup filesystem failures with sanitized operation and errno
+  diagnostics, including ownership preservation, permissions, space, and sync.
 - Preserve multiparagraph opening epigraphs, remove stale classes, and maintain
   narrative flow.
 - Allow an explicit public browser origin for Grimmory actions behind a reverse

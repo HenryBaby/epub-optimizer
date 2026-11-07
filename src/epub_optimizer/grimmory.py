@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import copy
+import errno
 import fcntl
 import hashlib
 import json
@@ -15,6 +16,7 @@ import tempfile
 import threading
 import time
 import uuid
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
@@ -22,6 +24,44 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from epub_optimizer.core import optimize_epub
 from epub_optimizer.errors import EpubOptimizerError
+
+
+class _FilesystemFailure(Exception):
+    """A diagnostic built only from trusted operation labels and errno names."""
+
+
+@contextmanager
+def _filesystem_step(stage, operation):
+    try:
+        yield
+    except OSError as exc:
+        # HTTPError inherits OSError, but describes a remote response, not a disk.
+        if isinstance(exc, HTTPError):
+            raise
+        code = errno.errorcode.get(exc.errno, "OS_ERROR")
+        if exc.errno in {errno.EACCES, errno.EPERM}:
+            if operation == "preserving ownership":
+                advice = (
+                    "The process cannot preserve the source owner/group. Check source ownership "
+                    "and whether the backup filesystem and service identity support preserving it."
+                )
+            else:
+                advice = (
+                    "Permission denied. Check the service identity's access to the source and "
+                    "backup mounts, including parent-directory traversal and backup write access."
+                )
+        elif exc.errno in {errno.ENOSPC, errno.EDQUOT}:
+            advice = "Insufficient space or quota. Free backup space or increase its quota."
+        elif exc.errno == errno.EROFS:
+            advice = "Read-only filesystem. Check that the backup mount permits writes."
+        elif exc.errno in {errno.ENOTSUP, errno.EOPNOTSUPP, errno.ENOSYS, errno.EINVAL}:
+            advice = (
+                "The filesystem rejected a required operation. Check support for metadata "
+                "preservation and durable file/directory sync on the backup mount."
+            )
+        else:
+            advice = "Filesystem operation failed. Check mount availability and storage health."
+        raise _FilesystemFailure(f"{stage} failed while {operation} ({code}). {advice}") from None
 
 
 def _digest(path):
@@ -87,10 +127,11 @@ def _metadata(path):
     )
 
 
-def _preserve(path, item):
+def _preserve(path, item, *, stage=None):
     current = path.stat()
     if (current.st_uid, current.st_gid) != (item["uid"], item["gid"]):
-        os.chown(path, item["uid"], item["gid"])
+        with _filesystem_step(stage, "preserving ownership") if stage else nullcontext():
+            os.chown(path, item["uid"], item["gid"])
     for name in os.listxattr(path):
         if name not in item.get("xattrs", {}):
             os.removexattr(path, name)
@@ -294,6 +335,8 @@ class GrimmoryManager:
         return value
 
     def _failure_message(self, exc, fallback):
+        if isinstance(exc, _FilesystemFailure):
+            return str(exc)
         if isinstance(exc, (GrimmoryValidationError, EpubOptimizerError)):
             message = str(exc)
             return message.replace(self._token, "[redacted]") if self._token else message
@@ -749,41 +792,59 @@ class GrimmoryManager:
             )
 
     def _snapshot(self, plan, job):
-        self._assert_tree(plan)
-        _safe(self.backup_dir, exists=False).mkdir(parents=True, exist_ok=True)
-        if shutil.disk_usage(self.backup_dir).free < plan["bytes"] * 2 + 1024 * 1024:
+        with _filesystem_step("Backup", "checking source tree"):
+            self._assert_tree(plan)
+        with _filesystem_step("Backup", "creating backup directory"):
+            _safe(self.backup_dir, exists=False).mkdir(parents=True, exist_ok=True)
+        with _filesystem_step("Backup", "checking free space"):
+            free = shutil.disk_usage(self.backup_dir).free
+        if free < plan["bytes"] * 2 + 1024 * 1024:
             raise GrimmoryValidationError(
                 "Insufficient free space for a full independent snapshot and staging."
             )
         snapshot_id = job["id"]
         target = self.backup_dir / snapshot_id
-        target.mkdir()
+        with _filesystem_step("Backup", "creating snapshot directory"):
+            target.mkdir()
         for index, (mapping, tree) in enumerate(zip(plan["mappings"], plan["trees"], strict=True)):
             root = Path(mapping["local_path"])
             dest = target / str(index)
-            dest.mkdir()
+            with _filesystem_step("Backup", "creating library backup directory"):
+                dest.mkdir()
             for name, item in tree.items():
                 if name == ".":
                     continue
                 source, output = root / name, dest / name
-                _safe(source)
+                with _filesystem_step("Backup", "checking source path"):
+                    _safe(source)
                 if item["type"] == "dir":
-                    output.mkdir()
+                    with _filesystem_step("Backup", "creating library backup directory"):
+                        output.mkdir()
                 else:
-                    shutil.copy2(source, output)
-                    _preserve(output, item)
-                    with output.open("rb") as stream:
+                    with _filesystem_step("Backup", "copying file and copy metadata"):
+                        shutil.copy2(source, output)
+                    with _filesystem_step("Backup", "preserving file metadata"):
+                        _preserve(output, item, stage="Backup")
+                    with (
+                        _filesystem_step("Backup", "syncing backup file"),
+                        output.open("rb") as stream,
+                    ):
                         os.fsync(stream.fileno())
-            self._directories(dest, tree)
-            for directory in sorted(
-                [dest, *[p for p in dest.rglob("*") if p.is_dir()]],
-                key=lambda p: len(p.parts),
-                reverse=True,
-            ):
-                _fsync_dir(directory)
-            if _manifest(dest) != tree:
+            with _filesystem_step("Backup", "preserving directory metadata"):
+                self._directories(dest, tree, stage="Backup")
+            with _filesystem_step("Backup", "syncing backup directories"):
+                for directory in sorted(
+                    [dest, *[p for p in dest.rglob("*") if p.is_dir()]],
+                    key=lambda p: len(p.parts),
+                    reverse=True,
+                ):
+                    _fsync_dir(directory)
+            with _filesystem_step("Backup", "verifying snapshot"):
+                verified = _manifest(dest) == tree
+            if not verified:
                 raise GrimmoryValidationError("Snapshot verification failed; library untouched.")
-        self._assert_tree(plan)
+        with _filesystem_step("Backup", "rechecking source tree"):
+            self._assert_tree(plan)
         snapshot = dict(
             snapshot_id=snapshot_id,
             plan=copy.deepcopy(plan),
@@ -791,20 +852,22 @@ class GrimmoryManager:
             status="ready",
             job_id=job["id"],
         )
-        _json_write(target / "manifest.json", snapshot)
-        _fsync_dir(target)
-        _fsync_dir(self.backup_dir)
-        _fsync_dir(self.backup_dir.parent)
+        with _filesystem_step("Backup", "persisting snapshot manifest"):
+            _json_write(target / "manifest.json", snapshot)
+        with _filesystem_step("Backup", "syncing snapshot and backup directories"):
+            _fsync_dir(target)
+            _fsync_dir(self.backup_dir)
+            _fsync_dir(self.backup_dir.parent)
         self._state["snapshots"][snapshot_id] = snapshot
         job["snapshot_id"] = snapshot_id
         self._save()
         return snapshot
 
     @staticmethod
-    def _directories(root, tree):
+    def _directories(root, tree, *, stage=None):
         for name, item in sorted(tree.items(), key=lambda x: len(Path(x[0]).parts), reverse=True):
             if item["type"] == "dir":
-                _preserve(root / name, item)
+                _preserve(root / name, item, stage=stage)
 
     def _replace(self, source, destination, original, before_hash, output_hash, journal):
         _safe(destination)

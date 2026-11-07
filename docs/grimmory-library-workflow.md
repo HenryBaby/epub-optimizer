@@ -111,6 +111,24 @@ per-book results, cancellation between books, retained backups, and explicit
 restore actions. Distinguish a library-files backup from a complete Grimmory
 snapshot in both labels and reports.
 
+If a job fails before processing any books, inspect its message in the Grimmory
+tab's current job and history. Backup filesystem failures identify the operation
+(directory creation, copying, ownership/metadata preservation, verification,
+manifest persistence, or sync) and errno class without exposing raw exception
+text, credentials, or remote URLs. The same message is saved with the job and
+available in status responses; a server traceback is not required.
+
+Permission failures during backup directory creation require checking the
+service identity's write and parent-directory traversal access to the backup
+mount. Ownership-preservation failures instead require checking source
+owner/group compatibility with the service identity and backup filesystem.
+Other messages distinguish space/quota exhaustion, read-only mounts, and rejected
+filesystem operations. Correct the reported condition, then preview and start
+again. These diagnostics do not establish the cause of an earlier generic
+failure or relax metadata, backup verification, or durability requirements.
+An incomplete backup is never offered as a ready snapshot; no books are optimized
+until the verified backup completes. Unexpected errors retain a generic message.
+
 Use temporary fixture libraries and mocked Grimmory endpoints to verify path
 containment, metadata preservation, exact filenames, backup completeness,
 hash/permission checks, cancellation, restart recovery, atomic publication,
