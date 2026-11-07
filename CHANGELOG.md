@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.3.0 - 2026-11-07
+
+### Added
+
+- Add manual Grimmory library discovery for mapped folders and full-folder
+  backups, with restore support and no automatic runs.
+- Keep strict metadata and exact filenames; explicitly exclude the database and
+  application state from folder backups.
+
+### Fixed
+
+- Preserve multiparagraph opening epigraphs, remove stale classes, and maintain
+  narrative flow.
+
 ## 1.2.8 - 2026-10-29
 
 ### Fixed

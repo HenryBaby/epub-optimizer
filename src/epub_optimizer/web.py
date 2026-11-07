@@ -13,7 +13,7 @@ from contextlib import asynccontextmanager, suppress
 from dataclasses import asdict
 from pathlib import Path
 from typing import Annotated
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
@@ -46,6 +46,9 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         await _automation_manager().stop()
+        manager = getattr(app.state, "grimmory_manager", None)
+        if manager is not None:
+            await manager.close()
 
 
 app = FastAPI(title="EPUB Optimizer", lifespan=lifespan)
@@ -70,6 +73,97 @@ def index(request: Request) -> HTMLResponse:
 @app.get("/automation")
 def automation_status() -> JSONResponse:
     return JSONResponse(_automation_manager().status())
+
+
+def _grimmory_manager():
+    # Construction is lazy; neither startup nor the home page connects or scans.
+    manager = getattr(app.state, "grimmory_manager", None)
+    if manager is None:
+        from epub_optimizer.grimmory import GrimmoryManager
+
+        manager = GrimmoryManager()
+        app.state.grimmory_manager = manager
+    return manager
+
+
+@app.get("/grimmory")
+def grimmory_status() -> JSONResponse:
+    return JSONResponse(_grimmory_manager().status(), headers={"Cache-Control": "no-store"})
+
+
+async def _grimmory_action(request: Request, action: str) -> JSONResponse:
+    origin = request.headers.get("origin")
+    if origin is not None:
+        try:
+            parsed = urlsplit(origin)
+        except ValueError as exc:
+            raise HTTPException(status_code=403, detail="Invalid request origin.") from exc
+        expected = urlsplit(str(request.base_url))
+        if (
+            parsed.scheme != expected.scheme
+            or parsed.netloc != expected.netloc
+            or parsed.path not in ("", "/")
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise HTTPException(status_code=403, detail="Same-origin requests are required.")
+    try:
+        body = await request.body()
+        if len(body) > 64 * 1024:
+            raise HTTPException(status_code=413, detail="Grimmory request is too large.")
+        payload = json.loads(body)
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise HTTPException(status_code=400, detail="Grimmory request must be valid JSON.") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Grimmory request must be an object.")
+    try:
+        manager = _grimmory_manager()
+        operation = getattr(manager, action)
+        result = await operation() if action == "cancel" else await operation(payload)
+    except ValueError as exc:
+        from epub_optimizer.grimmory import GrimmoryValidationError
+
+        # Only explicitly safe manager messages may reach the browser.
+        detail = (
+            str(exc)
+            if isinstance(exc, GrimmoryValidationError)
+            else "Grimmory request rejected. Check inputs and maintenance state."
+        )
+        raise HTTPException(status_code=400, detail=detail) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=409, detail="Grimmory operation conflicts with the current state."
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502, detail="Grimmory operation failed. Check the connection and try again."
+        ) from exc
+    return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+
+@app.post("/grimmory/connect")
+async def grimmory_connect(request: Request) -> JSONResponse:
+    return await _grimmory_action(request, "connect")
+
+
+@app.post("/grimmory/preview")
+async def grimmory_preview(request: Request) -> JSONResponse:
+    return await _grimmory_action(request, "preview")
+
+
+@app.post("/grimmory/start")
+async def grimmory_start(request: Request) -> JSONResponse:
+    return await _grimmory_action(request, "start")
+
+
+@app.post("/grimmory/cancel")
+async def grimmory_cancel(request: Request) -> JSONResponse:
+    return await _grimmory_action(request, "cancel")
+
+
+@app.post("/grimmory/restore")
+async def grimmory_restore(request: Request) -> JSONResponse:
+    return await _grimmory_action(request, "restore")
 
 
 @app.get("/health")

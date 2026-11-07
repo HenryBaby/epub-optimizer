@@ -13,6 +13,7 @@ from contextlib import suppress
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path, PurePosixPath
 from urllib.parse import unquote, urlsplit
+from zipfile import ZipFile
 
 from lxml import etree
 
@@ -178,6 +179,7 @@ def optimize_epub(
     max_size_bytes: int | None = None,
     progress: Callable[[str], None] | None = None,
     preserve_publisher_css: bool = False,
+    preserve_metadata: bool = False,
     epubcheck: EpubCheckRunner | None = None,
 ) -> OptimizationResult:
     started = time.perf_counter()
@@ -215,6 +217,7 @@ def optimize_epub(
 
         package_tree = _parse_xml(package_file)
         package_root = package_tree.getroot()
+        original_metadata = _protected_metadata(package_root) if preserve_metadata else None
         epub_version = package_root.attrib.get("version")
 
         manifest = _find_child(package_root, "manifest")
@@ -310,7 +313,8 @@ def optimize_epub(
             _append_log(log, "Generated missing EPUB 3 navigation document.", progress)
 
         _append_log(log, f"Processed {processed_docs} content document(s).", progress)
-        _ensure_optimizer_marker(package_root)
+        if not preserve_metadata:
+            _ensure_optimizer_marker(package_root)
         _write_xml(package_tree, package_file)
         repair_actions: list[str] = []
         _write_change_manifest(
@@ -349,6 +353,7 @@ def optimize_epub(
                 package_path,
                 package_tree,
                 epubcheck_output.errors,
+                preserve_metadata=preserve_metadata,
             )
             repair_actions.extend(pass_actions)
             if not pass_actions:
@@ -465,6 +470,8 @@ def optimize_epub(
             output_check_message,
             progress,
         )
+        if preserve_metadata:
+            _assert_preserved_metadata(staged_output_path, package_path, original_metadata)
         _publish_output(staged_output_path, output_path)
 
     elapsed = time.perf_counter() - started
@@ -489,6 +496,57 @@ def optimize_epub(
         validation_remaining=validation_remaining,
         validation_persisting=validation_persisting,
     )
+
+
+def _protected_metadata(package_root: etree._Element) -> tuple:
+    """Capture XML values and namespace context without depending on XML formatting.
+
+    Keep namespace bindings as well as expanded names: custom metadata can contain
+    QName-valued text or attributes whose meaning depends on those bindings.
+    Attribute ordering and quote/entity serialization are not bibliographic data.
+    """
+    def node_value(node: etree._Element) -> tuple:
+        if isinstance(node.tag, str):
+            identity = ("element", node.tag)
+        elif isinstance(node, etree._ProcessingInstruction):
+            identity = ("pi", node.target)
+        elif isinstance(node, etree._Comment):
+            identity = ("comment",)
+        else:
+            identity = ("entity", node.name)
+        return (
+            identity,
+            tuple(sorted(node.attrib.items())),
+            tuple(sorted((prefix or "", uri) for prefix, uri in node.nsmap.items())),
+            node.text,
+            tuple((node_value(child), child.tail) for child in node),
+        )
+
+    metadata = [
+        node_value(child)
+        for child in package_root
+        if child.tag in {f"{{{OPF_NS}}}metadata", "metadata"}
+    ]
+    return (
+        # Root attributes include the identifier/vocabulary declarations and
+        # inherited xml:lang/xml:base context that gives metadata its meaning.
+        tuple(sorted(package_root.attrib.items())),
+        tuple(metadata),
+    )
+
+
+def _assert_preserved_metadata(
+    staged_output: Path, package_path: str, original_metadata: tuple | None
+) -> None:
+    # Read the finished archive, rather than the mutable workspace tree: packaging
+    # and report embedding are also inside the preservation boundary.
+    with ZipFile(staged_output) as archive:
+        root = etree.fromstring(
+            archive.read(package_path),
+            etree.XMLParser(resolve_entities=False, no_network=True, recover=False),
+        )
+    if _protected_metadata(root) != original_metadata:
+        raise InvalidEpubError("Protected EPUB metadata changed; output not published")
 
 
 def _raise_for_introduced_epubcheck_errors(comparison) -> None:

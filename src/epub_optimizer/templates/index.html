@@ -76,7 +76,58 @@
         <button class="tab-button" type="button" data-tab="automation" aria-selected="false">
           Automation
         </button>
+        <button class="tab-button" type="button" data-tab="grimmory" aria-selected="false">
+          Grimmory
+        </button>
       </nav>
+
+      <div class="tab-panel" data-tab-panel="grimmory" hidden>
+        <section class="panel grimmory-panel" aria-labelledby="grimmory-heading">
+          <div class="panel-heading">
+            <div>
+              <h2 id="grimmory-heading">Grimmory library maintenance</h2>
+              <p>Manually discover libraries, preview selected folders, then back up and optimize in place.</p>
+            </div>
+            <span class="status-pill" id="grimmory-pill">Disconnected</span>
+          </div>
+          <p class="notice">The snapshot covers every file in the selected library folders, including non-EPUB sidecars. It excludes the Grimmory database and application state. Original filenames and directories are preserved; EPUB metadata is preserved strictly.</p>
+          <form id="grimmory-connect-form" class="grimmory-grid">
+            <label class="field-row">Grimmory URL
+              <input id="grimmory-url" type="url" placeholder="http://grimmory:6060" required autocomplete="url">
+            </label>
+            <label class="field-row">Username
+              <input id="grimmory-username" type="text" required autocomplete="off">
+            </label>
+            <label class="field-row">Password
+              <input id="grimmory-password" type="password" required autocomplete="off">
+            </label>
+            <button type="submit">Connect &amp; discover</button>
+          </form>
+          <h3>Library folder mappings</h3>
+          <p class="notice">Select remote library paths and map each to its mounted folder inside this optimizer container. Configure mounts in your deployment before continuing.</p>
+          <div id="grimmory-mappings" class="results-list"><p class="notice">Connect to discover library folders. Nothing runs automatically.</p></div>
+          <div class="grimmory-actions">
+            <button id="grimmory-preview" type="button" disabled>Preview selected folders</button>
+            <button id="grimmory-refresh" type="button" class="button secondary">Refresh status</button>
+          </div>
+          <div id="grimmory-plan" class="status-card" hidden></div>
+          <label class="filename-option grimmory-maintenance">
+            <input id="grimmory-maintenance" type="checkbox">
+            I have paused other writers and watchers for these folders, and disabled Grimmory library watching. This also applies before restoring a snapshot.
+          </label>
+          <div class="grimmory-actions">
+            <button id="grimmory-start" type="button" disabled>Back up &amp; optimize</button>
+            <button id="grimmory-cancel" type="button" class="button secondary" disabled>Cancel safely</button>
+          </div>
+          <p id="grimmory-message" role="status" aria-live="polite"></p>
+          <div id="grimmory-progress" class="status-card" aria-live="polite"></div>
+          <h3>Run history</h3>
+          <div id="grimmory-history" class="results-list"></div>
+          <h3>Library folder snapshots</h3>
+          <p class="notice">Restore replaces files covered by the selected snapshot. Review its folder scope and pause all writers first.</p>
+          <div id="grimmory-snapshots" class="results-list"></div>
+        </section>
+      </div>
 
       <div class="tab-panel tab-panel-active" data-tab-panel="optimizer">
         <section class="workspace optimizer-workspace">

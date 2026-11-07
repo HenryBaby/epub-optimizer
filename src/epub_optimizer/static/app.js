@@ -1219,3 +1219,252 @@ function downloadJson(filename, value) {
   link.remove();
   URL.revokeObjectURL(url);
 }
+
+// Grimmory is manual-only. Status reads never connect, scan, or start a job.
+(() => {
+  const panel = document.querySelector('[data-tab-panel="grimmory"]');
+  if (!panel) return;
+  const find = (name) => document.querySelector(`#grimmory-${name}`);
+  const connectForm = find("connect-form");
+  const mappingList = find("mappings");
+  const maintenance = find("maintenance");
+  let state = {};
+  let plan = null;
+  let busy = false;
+  let pollTimer = null;
+  let mappings = [];
+
+  function currentJob() {
+    if (state.active_job && typeof state.active_job === "object") return state.active_job;
+    return state.job || state.jobs?.find((job) => job.id === state.active_job) || state.jobs?.at(-1);
+  }
+
+  function element(tag, text, className) {
+    const node = document.createElement(tag);
+    if (text !== undefined) node.textContent = String(text);
+    if (className) node.className = className;
+    return node;
+  }
+
+  function active() {
+    const job = currentJob() || {};
+    return state.running === true || Boolean(state.active_job) || state.active === true || job.active === true ||
+      ["backing_up", "backup", "optimizing", "restoring", "running", "cancelling"].includes(job.phase || job.status);
+  }
+
+  function updateControls() {
+    const locked = busy || active();
+    connectForm.querySelectorAll("input, button").forEach((node) => { node.disabled = locked; });
+    mappingList.querySelectorAll("input").forEach((node) => { node.disabled = locked; });
+    maintenance.disabled = locked;
+    find("preview").disabled = locked || !state.connected || !mappings.some((row) => row.selected.checked);
+    find("start").disabled = locked || !plan?.plan_id || !maintenance.checked;
+    find("cancel").disabled = busy || !active();
+    find("refresh").disabled = busy;
+    find("snapshots").querySelectorAll("button").forEach((node) => {
+      node.disabled = locked || !maintenance.checked;
+    });
+  }
+
+  function invalidatePlan() {
+    plan = null;
+    find("plan").hidden = true;
+    updateControls();
+  }
+
+  function renderMappings() {
+    mappingList.replaceChildren();
+    mappings = [];
+    for (const library of state.libraries || []) {
+      for (const remote of library.paths || []) {
+        const remotePath = typeof remote === "string" ? remote : remote.path;
+        const row = element("div", undefined, "grimmory-mapping");
+        const label = element("label", undefined, "filename-option");
+        const selected = document.createElement("input");
+        selected.type = "checkbox";
+        label.append(selected, element("span", `${library.name} — ${remotePath} (watching: ${library.watch === false ? "disabled" : "enabled or unknown"})`));
+        const field = element("label", "Mounted folder in optimizer container", "field-row");
+        const local = document.createElement("input");
+        local.type = "text";
+        local.placeholder = "/libraries/books";
+        local.autocomplete = "off";
+        const saved = (state.mappings || []).find((mapping) =>
+          mapping.library_id === library.id && mapping.remote_path === remotePath);
+        if (saved) {
+          selected.checked = true;
+          local.value = saved.local_path;
+        }
+        field.append(local);
+        row.append(label, field);
+        mappingList.append(row);
+        mappings.push({ library_id: library.id, remote_path: remotePath, selected, local });
+        selected.addEventListener("change", invalidatePlan);
+        local.addEventListener("input", invalidatePlan);
+      }
+    }
+    if (!mappings.length) mappingList.append(element("p", "No library folders discovered. Connect to Grimmory to continue.", "notice"));
+  }
+
+  function renderPlan() {
+    const target = find("plan");
+    target.replaceChildren();
+    target.hidden = !plan;
+    if (!plan) return;
+    target.append(element("h3", "Library-folder backup preview"));
+    target.append(element("p", "All selected files and sidecars are backed up and verified before any EPUB is replaced. Grimmory database and application state are excluded."));
+    renderScope(target, plan);
+  }
+
+  function renderScope(target, preview) {
+    target.append(element("p", `${preview.epub_count || 0} EPUBs to optimize · ${preview.files || 0} files to back up · ${formatBytes(preview.bytes || 0)}`));
+    const scope = element("ul", undefined, "change-report");
+    for (const mapping of preview.mappings || []) {
+      scope.append(element("li", `${mapping.remote_path} → ${mapping.local_path} (optimizer container)`));
+    }
+    target.append(scope);
+  }
+
+  function renderJob(target, job) {
+    const results = job.results || [];
+    const finished = results.filter((item) => ["optimized", "restored"].includes(item.status)).length;
+    const failed = results.filter((item) => item.status === "failed").length;
+    const phases = {
+      backing_up: "Backing up and verifying library folders",
+      running: "Optimizing EPUBs",
+      restoring: "Restoring library folders",
+      completed: "Completed",
+      cancelled: "Cancelled safely",
+      failed: "Failed",
+      interrupted: "Interrupted; review the snapshot before continuing",
+    };
+    target.append(element("p", `${phases[job.status] || job.status || "Idle"} · ${finished} completed · ${failed} failed`));
+    if (job.message) target.append(element("p", job.message));
+    if (results.length) {
+      const details = element("details", undefined, "failure-details");
+      details.append(element("summary", `Per-file results (${results.length})`));
+      const list = element("ul", undefined, "change-report");
+      for (const result of results) {
+        list.append(element("li", `${result.path || result.filename || "File"} — ${result.status}${result.message ? `: ${result.message}` : ""}`));
+      }
+      details.append(list);
+      target.append(details);
+      if (active()) target.append(element("p", `Latest file: ${results.at(-1).path || results.at(-1).filename || "Preparing"}`));
+    }
+  }
+
+  function renderRecords(target, records, snapshot = false) {
+    target.replaceChildren();
+    for (const record of records || []) {
+      const card = element("div", undefined, "automation-job");
+      card.append(element("h3", snapshot ? `Library-folder snapshot ${record.snapshot_id || record.id || ""}` : `Run ${record.id || record.job_id || ""} — ${record.status || record.phase || ""}`));
+      if (record.created_at) card.append(element("p", new Date(record.created_at * 1000).toLocaleString()));
+      if (snapshot) {
+        card.append(element("p", `Snapshot status: ${record.status || "available"}`));
+        renderScope(card, record.plan || {});
+      } else renderJob(card, record);
+      if (snapshot && (record.snapshot_id || record.id)) {
+        const restore = element("button", "Restore this library-folder snapshot");
+        restore.type = "button";
+        restore.addEventListener("click", () => {
+          if (!maintenance.checked) return;
+          const scope = record.snapshot_id || record.id;
+          if (!window.confirm(`Restore library-folder snapshot ${scope}? Files covered by this snapshot will be replaced. All writers must remain paused.`)) return;
+          run("restore", { snapshot_id: scope, maintenance_confirmed: true });
+        });
+        card.append(restore);
+      }
+      target.append(card);
+    }
+    if (!target.childElementCount) target.append(element("p", "No records yet.", "notice"));
+  }
+
+  function render(next, refreshMappings = false) {
+    state = next;
+    find("pill").textContent = active() ? "Maintenance active" : (state.connected ? "Connected" : "Disconnected");
+    if (refreshMappings) renderMappings();
+    const progress = find("progress");
+    progress.replaceChildren(element("h3", "Current operation"));
+    if (currentJob()) renderJob(progress, currentJob());
+    else progress.append(element("p", "Idle. Jobs only start from the buttons above."));
+    renderRecords(find("history"), state.history || state.jobs);
+    renderRecords(find("snapshots"), state.snapshots, true);
+    updateControls();
+    clearTimeout(pollTimer);
+    if (active()) pollTimer = setTimeout(loadStatus, 1500);
+  }
+
+  async function request(path, payload) {
+    const response = await fetch(`/grimmory${path}`, payload === undefined ? {
+      cache: "no-store",
+    } : {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      cache: "no-store",
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.detail || "Grimmory request failed.");
+    return result;
+  }
+
+  async function loadStatus() {
+    try {
+      render(await request(""), mappings.length === 0);
+    } catch (error) {
+      find("message").textContent = error.message;
+      clearTimeout(pollTimer);
+    }
+  }
+
+  async function run(action, payload) {
+    busy = true;
+    find("message").textContent = "Working…";
+    updateControls();
+    try {
+      const result = await request(`/${action}`, payload);
+      if (action === "preview") {
+        plan = result;
+        renderPlan();
+      } else if (action === "connect") {
+        invalidatePlan();
+      } else if (action === "start" || action === "restore") {
+        invalidatePlan();
+        maintenance.checked = false;
+      }
+      if (action === "connect") render(result, true);
+      else render(await request(""));
+      find("message").textContent = action === "preview" ? "Preview ready. Confirm maintenance before starting." : "Request accepted.";
+    } catch (error) {
+      find("message").textContent = error.message;
+    } finally {
+      busy = false;
+      updateControls();
+    }
+  }
+
+  connectForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const payload = {
+      base_url: find("url").value,
+      username: find("username").value,
+      password: find("password").value,
+    };
+    find("password").value = "";
+    run("connect", payload);
+  });
+  find("preview").addEventListener("click", () => {
+    invalidatePlan();
+    run("preview", { mappings: mappings.filter((row) => row.selected.checked).map((row) => ({
+      library_id: row.library_id,
+      remote_path: row.remote_path,
+      local_path: row.local.value,
+    })) });
+  });
+  find("start").addEventListener("click", () => {
+    if (plan?.plan_id && maintenance.checked) run("start", { plan_id: plan.plan_id, maintenance_confirmed: true });
+  });
+  find("cancel").addEventListener("click", () => run("cancel", {}));
+  find("refresh").addEventListener("click", loadStatus);
+  maintenance.addEventListener("change", updateControls);
+  loadStatus();
+})();

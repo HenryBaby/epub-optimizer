@@ -1416,3 +1416,51 @@ dd {
   }
 
 }
+
+.grimmory-panel {
+  display: grid;
+  gap: 16px;
+  padding: 22px;
+}
+
+.grimmory-panel h3,
+.grimmory-panel p {
+  margin: 0;
+}
+
+.grimmory-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+
+.grimmory-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.grimmory-mapping {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  overflow-wrap: anywhere;
+}
+
+.grimmory-maintenance {
+  width: auto;
+  align-items: flex-start;
+  line-height: 1.5;
+}
+
+.grimmory-maintenance input {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+#grimmory-message {
+  color: var(--pink);
+}

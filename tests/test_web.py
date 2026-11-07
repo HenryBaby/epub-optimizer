@@ -5,6 +5,7 @@ from io import BytesIO
 import pytest
 from fastapi.testclient import TestClient
 
+from epub_optimizer import __version__
 from epub_optimizer.automation import AutomationJob, AutomationManager
 from epub_optimizer.web import app
 
@@ -34,9 +35,9 @@ def test_homepage_renders() -> None:
 
     assert response.status_code == 200
     assert "EPUB Optimizer" in response.text
-    assert "v1.2.3" in response.text
-    assert 'href="/static/favicon.png?v=1.2.3"' in response.text
-    assert 'href="/static/styles.css?v=1.2.3"' in response.text
+    assert f"v{__version__}" in response.text
+    assert f'href="/static/favicon.png?v={__version__}"' in response.text
+    assert f'href="/static/styles.css?v={__version__}"' in response.text
     assert 'id="optimizer-form"' in response.text
     assert 'name="files"' in response.text
     assert 'id="source-picker"' in response.text
@@ -62,7 +63,7 @@ def test_homepage_renders() -> None:
     assert 'id="pipeline-last-scan"' in response.text
     assert 'id="pipeline-next-scan"' in response.text
     assert 'id="automation-scan-state"' in response.text
-    assert 'src="/static/app.js?v=1.2.3"' in response.text
+    assert f'src="/static/app.js?v={__version__}"' in response.text
 
 
 def test_automation_status_and_configuration() -> None:
@@ -114,7 +115,7 @@ def test_health_endpoint_reports_service_status() -> None:
     assert response.status_code == 200
     assert response.json() == {
         "status": "ok",
-        "version": "1.2.3",
+        "version": __version__,
         "automation_running": False,
         "automation_enabled": False,
     }
