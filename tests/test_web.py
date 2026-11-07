@@ -42,6 +42,7 @@ def test_homepage_renders() -> None:
     assert 'name="files"' in response.text
     assert 'id="source-picker"' in response.text
     assert 'id="choose-folder"' in response.text
+    assert response.text.index('class="app-tabs"') < response.text.index('id="upload-queue"')
     assert 'id="append-suffix"' in response.text
     assert "multiple" in response.text
     assert 'id="theme-toggle"' in response.text

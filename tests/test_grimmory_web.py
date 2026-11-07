@@ -46,6 +46,8 @@ def test_home_and_status_do_not_start_library_work(grimmory):
     assert 'id="grimmory-pause-watching"' in response.text
     assert 'id="grimmory-resume-watching"' in response.text
     assert "excludes the Grimmory database and application state" in response.text
+    assert 'aria-label="Maintenance progress"' in response.text
+    assert 'id="grimmory-past-activity"' in response.text
     manager.status.assert_not_called()
     assert client.get("/grimmory").json()["connected"] is False
     for action in ACTIONS:

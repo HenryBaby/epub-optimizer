@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Bring Grimmory maintenance into one guided workbench with contextual folder,
+  preparation, progress, and review steps, plus persistent watching recovery.
+- Put navigation before content and show the upload queue only in Optimizer and
+  Analyze. Group past runs and backups into a single expandable activity area.
+- Keep folder drafts and result disclosures stable during status updates, show
+  failures first, and add accessible busy states and reduced-motion support.
+
 ## 1.3.0 - 2026-11-07
 
 ### Added

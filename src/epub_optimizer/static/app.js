@@ -784,6 +784,8 @@ function activateTab(tabName) {
     panel.hidden = !isActive;
   }
 
+  document.querySelector("#upload-queue").hidden = !["optimizer", "analyze"].includes(nextTab);
+
   localStorage.setItem(STORAGE_KEYS.tab, nextTab);
 }
 
@@ -1234,6 +1236,36 @@ function downloadJson(filename, value) {
   let pollTimer = null;
   let mappings = [];
   let mappingsBaseUrl = null;
+  let choosingFolders = false;
+  let busyAction = "";
+  const renderSignatures = new Map();
+
+  function message(text, error = false) {
+    const target = find("message");
+    target.textContent = text;
+    target.hidden = !text;
+    target.classList.toggle("is-error", error);
+    target.setAttribute("role", error ? "alert" : "status");
+  }
+
+  // Reuse unchanged sections and restore disclosure state when status advances.
+  function renderChanged(name, value, callback) {
+    const signature = JSON.stringify(value);
+    if (renderSignatures.get(name) === signature) return;
+    const target = find(name);
+    const focused = target.contains(document.activeElement) ? document.activeElement : null;
+    const focusedKey = focused?.closest("details")?.dataset.key;
+    const focusedTag = focused?.tagName;
+    const open = new Map(Array.from(target.querySelectorAll("details")).map((node) => [node.dataset.key, node.open]));
+    callback(target);
+    target.querySelectorAll("details").forEach((node) => {
+      if (open.has(node.dataset.key)) node.open = open.get(node.dataset.key);
+      if (focusedKey && node.dataset.key === focusedKey && focusedTag) {
+        node.querySelector(focusedTag.toLowerCase())?.focus({ preventScroll: true });
+      }
+    });
+    renderSignatures.set(name, signature);
+  }
 
   function currentJob() {
     if (state.active_job && typeof state.active_job === "object") return state.active_job;
@@ -1273,11 +1305,51 @@ function downloadJson(filename, value) {
     find("snapshots").querySelectorAll("button").forEach((node) => {
       node.disabled = locked || !maintenance.checked;
     });
+    find("edit-folders").disabled = locked;
+    find("new-run").disabled = locked;
+    const selected = mappings.filter((row) => row.selected.checked).length;
+    find("selection-count").textContent = `${selected} selected`;
+    const hasJob = Boolean(currentJob()) && !choosingFolders;
+    const step = active() ? "run" : !state.connected ? "connect" : plan ? "prepare" : hasJob ? "review" : "folders";
+    panel.dataset.uiPhase = step;
+    panel.classList.toggle("is-busy", busy || active());
+    panel.setAttribute("aria-busy", String(busy));
+    panel.querySelectorAll("[data-step]").forEach((node) => {
+      if (node.dataset.step === step) node.setAttribute("aria-current", "step");
+      else node.removeAttribute("aria-current");
+    });
+    find("folder-step").hidden = step !== "folders";
+    find("prepare-step").hidden = step !== "prepare";
+    const watchingActions = find(step === "prepare" ? "prepare-actions" : "folder-actions");
+    if (find("pause-watching").parentElement !== watchingActions) watchingActions.append(find("pause-watching"));
+    find("progress").hidden = !["run", "review"].includes(step);
+    find("maintenance-confirmation").hidden = !plan && !find("past-activity").open;
+    find("start").hidden = step !== "prepare";
+    find("cancel").hidden = !active();
+    find("review-actions").hidden = step !== "review";
+    find("next-step").textContent = {
+      connect: "Connect to choose the folders you want to optimize.",
+      folders: "Choose folders, pause watching, then preview the backup scope.",
+      prepare: "Review the scope and confirm writers are paused before starting.",
+      run: "Keep writers paused while your library is being maintained.",
+      review: "Review the outcome, then explicitly resume previous watching states.",
+    }[step];
+    const labels = {
+      preview: "Preview folders", "pause-watching": "Pause watching",
+      "resume-watching": "Resume watching", start: "Back up & optimize", cancel: "Cancel safely",
+    };
+    for (const [name, label] of Object.entries(labels)) {
+      find(name).textContent = busy && busyAction === name ? "Working…" : label;
+      find(name).classList.toggle("is-loading", busy && busyAction === name);
+    }
+    const submit = connectForm.querySelector('button[type="submit"]');
+    submit.textContent = busy && busyAction === "connect" ? "Connecting…" : "Connect";
   }
 
   function invalidatePlan() {
     plan = null;
     find("plan").hidden = true;
+    maintenance.checked = false;
     updateControls();
   }
 
@@ -1296,8 +1368,13 @@ function downloadJson(filename, value) {
         const label = element("label", undefined, "filename-option");
         const selected = document.createElement("input");
         selected.type = "checkbox";
-        label.append(selected, element("span", `${library.name} — ${remotePath} (watching: ${library.watch === false ? "disabled" : "enabled or unknown"})`));
-        const field = element("label", "Mounted folder in optimizer container", "field-row");
+        selected.setAttribute("aria-label", `Select ${library.name}: ${remotePath}`);
+        const badge = element("span", library.watch === false ? "Watching off" : library.watch === true ? "Watching on" : "Watching unknown", "watch-badge");
+        badge.dataset.libraryId = String(library.id);
+        label.append(selected, element("strong", library.name), badge);
+        const paths = element("div", undefined, "mapping-paths");
+        paths.append(element("p", `Grimmory · ${remotePath}`, "notice"));
+        const field = element("label", "Mounted path", "field-row");
         const local = document.createElement("input");
         local.type = "text";
         local.placeholder = "/libraries/books";
@@ -1314,7 +1391,8 @@ function downloadJson(filename, value) {
           local.value = saved.local_path;
         }
         field.append(local);
-        row.append(label, field);
+        paths.append(field);
+        row.append(label, paths);
         mappingList.append(row);
         mappings.push({ library_id: library.id, remote_path: remotePath, selected, local });
         selected.addEventListener("change", invalidatePlan);
@@ -1330,13 +1408,15 @@ function downloadJson(filename, value) {
 
   function renderWatcherMaintenance() {
     const target = find("watcher-maintenance");
-    target.replaceChildren(element("h3", "Selected library watching"));
+    target.replaceChildren();
     const receipt = state.watcher_maintenance;
-    if (!receipt) {
-      target.append(element("p", "No saved watching session. Select library folders, then explicitly pause watching; a local mount or preview is not required."));
-      return;
-    }
-    target.append(element("p", `Watching session: ${receipt.status} · ${receipt.base_url}`));
+    find("watching").hidden = !receipt;
+    if (!receipt) return;
+    const pending = receipt.status !== "resumed";
+    find("watching").classList.toggle("watching-pending", pending);
+    find("resume-watching").hidden = !pending;
+    const heading = !pending ? "Previous watching states restored" : receipt.status === "paused" ? "Watching paused" : "Watching needs your attention";
+    target.append(element("h3", heading));
     const list = element("ul");
     for (const library of receipt.libraries || []) {
       const labels = {
@@ -1347,14 +1427,14 @@ function downloadJson(filename, value) {
       };
       list.append(element("li", `${library.name || `Library ${library.library_id}`} — ${labels[library.status] || library.status}${library.error ? `: ${library.error}` : ""}`));
     }
+    if (receipt.libraries?.some((library) => library.error)) list.setAttribute("role", "alert");
     target.append(list);
-    if (receipt.status !== "resumed") {
-      target.append(element("p", "Review partial failures before continuing. Watching remains paused after job completion and application restarts until you explicitly resume. Originally disabled watching stays disabled."));
+    if (pending) {
+      target.append(element("p", "Watching stays paused after completion and restarts. Resume restores previous settings."));
       if (!state.connected || receipt.base_url !== state.base_url) {
-        target.append(element("p", "Reconnect to this same Grimmory instance to resume the saved previous watching states."));
+        target.append(element("p", `Reconnect to ${receipt.base_url} to resume the saved previous watching states.`));
       }
     }
-    target.append(element("p", "Queued imports, scans, metadata writes, and other external writers must be handled separately before confirming maintenance."));
   }
 
   function renderPlan() {
@@ -1362,8 +1442,7 @@ function downloadJson(filename, value) {
     target.replaceChildren();
     target.hidden = !plan;
     if (!plan) return;
-    target.append(element("h3", "Library-folder backup preview"));
-    target.append(element("p", "All selected files and sidecars are backed up and verified before any EPUB is replaced. Grimmory database and application state are excluded."));
+    target.append(element("h3", "Backup preview"));
     renderScope(target, plan);
   }
 
@@ -1389,13 +1468,41 @@ function downloadJson(filename, value) {
       failed: "Failed",
       interrupted: "Interrupted; review the snapshot before continuing",
     };
-    target.append(element("p", `${phases[job.status] || job.status || "Idle"} · ${finished} completed · ${failed} failed`));
+    target.append(element("h3", job.status === "completed" && failed ? "Completed with issues" : phases[job.phase || job.status] || job.phase || job.status || "Idle"));
+    if (results.length) target.append(element("p", `${finished} completed · ${failed} failed`, failed ? "warnings" : undefined));
+    if (active() && job === currentJob()) {
+      const meter = element("div", undefined, "meter grimmory-meter");
+      meter.setAttribute("role", "progressbar");
+      meter.setAttribute("aria-label", "Library maintenance in progress");
+      const total = (job.phase || job.status) === "backing_up" ? null : job.plan?.epub_count || plan?.epub_count;
+      if (total) {
+        meter.setAttribute("aria-valuemin", "0");
+        meter.setAttribute("aria-valuemax", String(total));
+        meter.setAttribute("aria-valuenow", String(Math.min(total, results.length)));
+      } else meter.classList.add("is-indeterminate");
+      const fill = element("span");
+      fill.style.width = total ? `${Math.min(100, results.length / total * 100)}%` : "35%";
+      meter.append(fill);
+      target.append(meter);
+    }
     if (job.message) target.append(element("p", job.message));
     if (results.length) {
+      if (failed) {
+        const failures = element("div", undefined, "grimmory-failures");
+        failures.setAttribute("role", "alert");
+        failures.append(element("h4", `${failed} ${failed === 1 ? "file needs" : "files need"} attention`));
+        const list = element("ul", undefined, "change-report");
+        results.filter((result) => result.status === "failed").forEach((result) => {
+          list.append(element("li", `${result.path || result.filename || "File"}${result.message ? ` — ${result.message}` : ""}`));
+        });
+        failures.append(list);
+        target.append(failures);
+      }
       const details = element("details", undefined, "failure-details");
+      details.dataset.key = `results-${job.id || job.job_id || "current"}`;
       details.append(element("summary", `Per-file results (${results.length})`));
       const list = element("ul", undefined, "change-report");
-      for (const result of results) {
+      for (const result of [...results].sort((left, right) => Number(right.status === "failed") - Number(left.status === "failed"))) {
         list.append(element("li", `${result.path || result.filename || "File"} — ${result.status}${result.message ? `: ${result.message}` : ""}`));
       }
       details.append(list);
@@ -1407,9 +1514,11 @@ function downloadJson(filename, value) {
   function renderRecords(target, records, snapshot = false) {
     target.replaceChildren();
     for (const record of records || []) {
-      const card = element("div", undefined, "automation-job");
-      card.append(element("h3", snapshot ? `Library-folder snapshot ${record.snapshot_id || record.id || ""}` : `Run ${record.id || record.job_id || ""} — ${record.status || record.phase || ""}`));
-      if (record.created_at) card.append(element("p", new Date(record.created_at * 1000).toLocaleString()));
+      const card = element("details", undefined, "grimmory-record");
+      card.dataset.key = `${snapshot ? "snapshot" : "run"}-${record.snapshot_id || record.id || record.job_id}`;
+      const date = record.created_at ? new Date(record.created_at * 1000).toLocaleString() : "Date unavailable";
+      card.append(element("summary", `${snapshot ? "Backup" : "Run"} · ${date} · ${record.status || record.phase || "available"}`));
+      card.append(element("p", `ID: ${record.snapshot_id || record.id || record.job_id || "Unavailable"}`, "technical-id notice"));
       if (snapshot) {
         card.append(element("p", `Snapshot status: ${record.status || "available"}`));
         renderScope(card, record.plan || {});
@@ -1431,16 +1540,26 @@ function downloadJson(filename, value) {
   }
 
   function render(next, refreshMappings = false) {
+    const wasConnected = state.connected;
     state = next;
     find("pill").textContent = active() ? "Maintenance active" : (state.connected ? "Connected" : "Disconnected");
     if (refreshMappings) renderMappings();
-    renderWatcherMaintenance();
-    const progress = find("progress");
-    progress.replaceChildren(element("h3", "Current operation"));
-    if (currentJob()) renderJob(progress, currentJob());
-    else progress.append(element("p", "Idle. Jobs only start from the buttons above."));
-    renderRecords(find("history"), state.history || state.jobs);
-    renderRecords(find("snapshots"), state.snapshots, true);
+    // Watch changes update badges without replacing the inputs or their drafts.
+    mappingList.querySelectorAll(".watch-badge").forEach((badge) => {
+      const library = (state.libraries || []).find((item) => String(item.id) === badge.dataset.libraryId);
+      badge.textContent = library?.watch === false ? "Watching off" : library?.watch === true ? "Watching on" : "Watching unknown";
+    });
+    find("connection-summary").textContent = state.connected ? `Connected · ${state.base_url || "Grimmory"}` : "Connect to Grimmory";
+    if (state.connected && !wasConnected) find("connection").open = false;
+    if (!state.connected) find("connection").open = true;
+    renderChanged("watcher-maintenance", [state.watcher_maintenance, state.connected, state.base_url], renderWatcherMaintenance);
+    renderChanged("progress", [currentJob(), active()], (progress) => {
+      progress.replaceChildren();
+      if (currentJob()) renderJob(progress, currentJob());
+    });
+    renderChanged("history", state.history || state.jobs || [], (target) => renderRecords(target, state.history || state.jobs));
+    renderChanged("snapshots", state.snapshots || [], (target) => renderRecords(target, state.snapshots, true));
+    find("activity-count").textContent = `${(state.history || state.jobs || []).length} runs · ${(state.snapshots || []).length} backups`;
     updateControls();
     clearTimeout(pollTimer);
     if (active()) pollTimer = setTimeout(loadStatus, 1500);
@@ -1464,32 +1583,41 @@ function downloadJson(filename, value) {
     try {
       render(await request(""), mappings.length === 0);
     } catch (error) {
-      find("message").textContent = error.message;
+      message(error.message, true);
       clearTimeout(pollTimer);
     }
   }
 
   async function run(action, payload) {
     busy = true;
-    find("message").textContent = "Working…";
+    busyAction = action;
+    message("");
     updateControls();
     try {
       const result = await request(`/${action}`, payload);
       if (action === "preview") {
+        choosingFolders = false;
         plan = result;
         renderPlan();
       } else if (["connect", "pause-watching", "resume-watching"].includes(action)) {
+        if (action === "connect") choosingFolders = true;
         invalidatePlan();
         maintenance.checked = false;
       } else if (action === "start" || action === "restore") {
+        choosingFolders = false;
         invalidatePlan();
         maintenance.checked = false;
       }
       if (["connect", "pause-watching", "resume-watching"].includes(action)) render(result, true);
       else render(await request(""));
-      find("message").textContent = action === "preview" ? "Preview ready. Confirm maintenance before starting." : "Request accepted.";
+      if (action === "preview") message("Preview ready. Confirm maintenance before starting.");
+      else if (action === "pause-watching") {
+        const receipt = state.watcher_maintenance;
+        const paused = receipt?.status === "paused" && !receipt.libraries?.some((library) => library.error);
+        message(paused ? "Watching paused. Preview folders to continue." : "Watching updated. Review any watching errors, then preview folders again to confirm the current scope.");
+      }
     } catch (error) {
-      find("message").textContent = error.message;
+      message(error.message, true);
     } finally {
       busy = false;
       updateControls();
@@ -1529,10 +1657,18 @@ function downloadJson(filename, value) {
     run("resume-watching", { session_id: receipt.session_id });
   });
   find("start").addEventListener("click", () => {
-    if (plan?.plan_id && maintenance.checked) run("start", { plan_id: plan.plan_id, maintenance_confirmed: true });
+    if (!busy && !active() && plan?.plan_id && maintenance.checked) run("start", { plan_id: plan.plan_id, maintenance_confirmed: true });
   });
-  find("cancel").addEventListener("click", () => run("cancel", {}));
+  find("cancel").addEventListener("click", () => { if (!busy && active()) run("cancel", {}); });
   find("refresh").addEventListener("click", loadStatus);
   maintenance.addEventListener("change", updateControls);
+  find("past-activity").addEventListener("toggle", updateControls);
+  function editFolders() {
+    choosingFolders = true;
+    invalidatePlan();
+    message("");
+  }
+  find("edit-folders").addEventListener("click", editFolders);
+  find("new-run").addEventListener("click", editFolders);
   loadStatus();
 })();

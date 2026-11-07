@@ -90,6 +90,10 @@ body::before {
   margin: 32px auto;
 }
 
+.shell:has(.tab-panel-active[data-tab-panel="grimmory"]) {
+  max-width: 920px;
+}
+
 .topbar {
   display: flex;
   gap: 24px;
@@ -700,7 +704,7 @@ form {
   font: inherit;
 }
 
-button:not(.dropzone-main):not(.folder-link):not(.tab-button),
+button:where(:not(.dropzone-main):not(.folder-link):not(.tab-button)),
 .button {
   display: inline-flex;
   align-items: center;
@@ -721,7 +725,7 @@ button:not(.dropzone-main):not(.folder-link):not(.tab-button),
     transform 160ms ease;
 }
 
-button:not(.dropzone-main):not(.folder-link):not(.tab-button):hover,
+button:where(:not(.dropzone-main):not(.folder-link):not(.tab-button):hover),
 .button:hover {
   background: var(--accent-strong);
   transform: translateY(-1px);
@@ -1423,48 +1427,94 @@ dd {
   padding: 22px;
 }
 
-.grimmory-panel h3,
-.grimmory-panel p {
-  margin: 0;
-}
+.grimmory-panel h3, .grimmory-panel p { margin: 0; }
+.grimmory-grid { display: grid; gap: 12px; align-items: end; }
+.grimmory-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+.grimmory-maintenance { width: auto; align-items: flex-start; line-height: 1.5; }
+.grimmory-maintenance input { flex-shrink: 0; margin-top: 2px; }
+#grimmory-watcher-maintenance { overflow-wrap: anywhere; }
 
-.grimmory-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 12px;
-  align-items: end;
-}
+/* Native hidden must override component display rules in every workspace. */
+[hidden] { display: none !important; }
 
-.grimmory-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
+.app-tabs { margin-bottom: 20px; }
+.queue-panel { margin-bottom: 20px; }
+.grimmory-panel { max-width: 920px; margin-inline: auto; gap: 22px; padding: 30px; }
+.grimmory-panel .panel-heading { margin-bottom: 0; }
+.grimmory-panel .panel-heading .status-pill { justify-self: start; }
+.grimmory-panel .eyebrow { color: var(--muted); }
+.grimmory-panel .panel-heading h2 { font-size: 28px; }
+.grimmory-panel .panel-heading p { margin-top: 6px; max-width: 580px; }
+.grimmory-panel h3 { font-size: 16px; }
+.grimmory-panel summary { cursor: pointer; line-height: 1.5; }
+.grimmory-panel input { min-width: 0; max-width: 100%; }
+.grimmory-panel :is(button, input, summary):focus-visible,
+.app-tabs button:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
+.grimmory-steps { display: flex; list-style: none; gap: 10px; padding: 0 0 20px; margin: 0; border-bottom: 1px solid var(--border); }
+.grimmory-steps li { display: flex; align-items: center; gap: 7px; flex: 1; color: var(--muted); font-size: 13px; }
+.grimmory-steps li span { display: grid; place-items: center; width: 25px; height: 25px; border: 1px solid var(--border-strong); border-radius: 50%; }
+.grimmory-steps [aria-current] { color: var(--accent); font-weight: 700; }
+.grimmory-steps [aria-current] span { background: var(--accent); color: var(--accent-contrast); border-color: var(--accent); }
+.grimmory-connection { min-width: 0; }
+.grimmory-connection > summary { overflow-wrap: anywhere; font-weight: 600; }
+.disclosure-hint { font-size: 12px; font-weight: 400; color: var(--muted); margin-left: 12px; }
+.grimmory-connection[open] > summary { margin-bottom: 18px; }
+.grimmory-connection .grimmory-grid { grid-template-columns: 2fr 1fr 1fr; }
+.grimmory-grid button { justify-self: start; grid-column: 1 / -1; }
+.grimmory-stage { display: grid; gap: 18px; min-width: 0; }
+.stage-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.grimmory-mapping { display: grid; border: 1px solid var(--border); background: var(--surface); border-radius: 10px; gap: 14px; padding: 16px; overflow-wrap: anywhere; }
+.grimmory-mapping .filename-option { width: 100%; margin: 0; gap: 10px; flex-wrap: wrap; }
+.grimmory-mapping .filename-option strong { flex: 1; }
+.watch-badge { font-size: 12px; padding: 3px 8px; border-radius: 6px; background: var(--surface-strong); color: var(--muted); }
+.mapping-paths { display: grid; gap: 10px; padding-left: 26px; }
+.mapping-paths .field-row { display: grid; grid-template-columns: 90px minmax(0, 1fr); align-items: center; font-size: 13px; }
+.grimmory-watching { display: grid; gap: 12px; padding: 16px 18px; border: 1px solid var(--border); border-left: 4px solid var(--green); border-radius: 8px; background: var(--surface-strong); }
+.grimmory-watching.watching-pending { border-left-color: var(--warning); }
+.grimmory-watching p { font-size: 13px; line-height: 1.5; }
+.grimmory-watching ul { margin: 10px 0; padding-left: 20px; font-size: 13px; }
+.grimmory-watching button { justify-self: start; }
+[data-ui-phase="review"] #grimmory-resume-watching { background: var(--accent); border-color: var(--accent); color: var(--accent-contrast); }
+.grimmory-help { color: var(--muted); font-size: 13px; }
+.grimmory-help p { padding-top: 8px; line-height: 1.6; }
+.grimmory-connection .grimmory-help { margin-top: 16px; }
+.grimmory-maintenance { padding: 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-strong); margin: 0 0 10px; }
+#grimmory-plan { background: var(--surface-strong); display: grid; gap: 12px; padding: 18px; }
+#grimmory-message { padding: 12px 16px; color: var(--text); background: var(--accent-soft); border-radius: 8px; font-size: 14px; overflow-wrap: anywhere; }
+#grimmory-message.is-error { color: var(--danger); border-left: 4px solid var(--danger); }
+#grimmory-progress { padding: 20px; background: var(--surface-strong); border-radius: 10px; overflow-wrap: anywhere; }
+#grimmory-progress > h3 { font-size: 21px; }
+.grimmory-meter span { background: var(--accent); transition: width .3s ease; }
+.grimmory-meter.is-indeterminate span { animation: grimmory-progress 1.6s ease-in-out infinite alternate; }
+.grimmory-failures { border-left: 3px solid var(--danger); padding-left: 14px; }
+.grimmory-failures h4 { margin: 0; color: var(--danger); }
+.grimmory-past { border-top: 1px solid var(--border); padding-top: 18px; }
+.grimmory-past > summary { font-weight: 600; }
+.grimmory-past > h3 { margin: 20px 0 12px; }
+.grimmory-past > p { margin-bottom: 12px; }
+.grimmory-record { padding: 14px 0; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+.grimmory-record[open] { display: grid; gap: 12px; }
+.grimmory-record[open] > summary { margin-bottom: 8px; }
+.grimmory-record button { justify-self: start; }
+.technical-id { font-family: ui-monospace, monospace; font-size: 12px; }
+.grimmory-footer { display: flex; align-items: start; justify-content: space-between; gap: 20px; }
+.grimmory-footer .grimmory-help { max-width: 640px; }
+.grimmory-footer button { flex-shrink: 0; }
+.is-loading::before { content: ""; display: inline-block; width: 12px; height: 12px; margin-right: 8px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: grimmory-spin .8s linear infinite; }
+@keyframes grimmory-spin { to { transform: rotate(360deg); } }
+@keyframes grimmory-progress { from { transform: translateX(0); } to { transform: translateX(180%); } }
+@media (max-width: 640px) {
+  .grimmory-panel { padding: 18px; gap: 18px; }
+  .grimmory-steps { gap: 5px; }
+  .grimmory-steps li { flex-direction: column; font-size: 11px; gap: 5px; }
+  .grimmory-connection .grimmory-grid { grid-template-columns: minmax(0, 1fr); }
+  .disclosure-hint { display: block; margin-left: 18px; }
+  .mapping-paths { padding-left: 0; }
+  .mapping-paths .field-row { grid-template-columns: minmax(0, 1fr); }
+  .grimmory-actions { gap: 8px; }
+  .grimmory-actions button { width: 100%; margin: 0; }
+  .grimmory-footer { flex-wrap: wrap; }
 }
-
-.grimmory-mapping {
-  display: grid;
-  gap: 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 12px;
-  overflow-wrap: anywhere;
-}
-
-.grimmory-maintenance {
-  width: auto;
-  align-items: flex-start;
-  line-height: 1.5;
-}
-
-.grimmory-maintenance input {
-  flex-shrink: 0;
-  margin-top: 2px;
-}
-
-#grimmory-message {
-  color: var(--pink);
-}
-
-#grimmory-watcher-maintenance {
-  overflow-wrap: anywhere;
+@media (prefers-reduced-motion: reduce) {
+  .grimmory-panel *, .grimmory-panel *::before { animation: none !important; transition: none !important; }
 }
