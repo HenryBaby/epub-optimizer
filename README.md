@@ -24,6 +24,108 @@ conservative cleanup rather than aggressive rewriting.
 It does not remove DRM, rewrite book text, strip metadata, recompress images,
 fetch remote resources, upload books anywhere, or overwrite the original EPUB.
 
+The separate Grimmory maintenance workflow can explicitly replace library EPUBs
+in place after a verified library-folder backup. It uses a strict metadata
+preservation policy; the usual upload and watched-folder workflows retain their
+existing behavior.
+
+## Grimmory library maintenance
+
+The Grimmory tab is for manually rerunning selected libraries after optimizer
+improvements. It never starts a library job automatically or resumes one after
+an application restart. No Docker socket or access to Grimmory's containers is
+required.
+
+The optimizer container needs explicit mounts for the selected libraries and a
+separate backup directory. See
+[docker-compose.grimmory.example.yml](docker-compose.grimmory.example.yml) for
+an optional overlay; replace its host paths before using it. Set
+`EPUB_OPTIMIZER_LIBRARY_ROOTS` to the allowed container directories (separated by
+`:` on Linux) and `EPUB_OPTIMIZER_LIBRARY_BACKUP_DIR` to the backup directory.
+Without allowed roots, library maintenance is disabled. These are optimizer
+container paths, not paths discovered by inspecting other containers.
+
+When the optimizer is behind a reverse proxy that terminates HTTPS, set its
+public browser origin in the optimizer container environment, for example:
+
+```yaml
+environment:
+  EPUB_OPTIMIZER_PUBLIC_ORIGIN: https://epubo.example.org
+```
+
+Recreate the optimizer container after changing its environment. This is the
+URL you open for **EPUB Optimizer**, not the Grimmory server URL entered in the
+connection form or an internal API/container address. Use a single `http://` or
+`https://` origin with its port if nonstandard, without credentials, a path,
+query, or fragment (a trailing `/` is accepted). Once configured, only this
+origin is accepted for browser Grimmory actions, including when the proxy
+connects to the optimizer over HTTP. An invalid setting blocks Grimmory actions
+until corrected. Without this setting, browser actions must match the request's
+own origin. Forwarding headers do not configure the allowed origin. If you see
+“Same-origin requests are required,” check this setting against the optimizer
+URL in your browser and have the proxy operator configure it accordingly.
+
+1. Connect using the Grimmory server URL and a local account with admin or
+   manage-library permission. Credentials/tokens are not saved to the browser or persisted by
+   the optimizer; reconnect after a restart or expired login.
+2. Select the library folders and click **Pause watching selected libraries**.
+   This uses Grimmory's API and requires neither a local mount nor a preview.
+   Review the saved receipt for paused libraries, already disabled watching, or
+   partial failures; retry the same selection explicitly if necessary.
+3. Wait for queued imports, scans, and metadata writes to finish, and pause other
+   writers to these folders. Pause EPUB Optimizer watched Automation separately
+   if it feeds Bookdrop. Watching controls do not stop these activities. Keep
+   writers paused through backup, optimization, or restore.
+4. Map each selected Grimmory library path to its mounted path in the optimizer
+   container, then **Preview selected folders** for scope and space requirements.
+5. Confirm the maintenance window and click **Back up & optimize**. Every selected
+   file, including sidecars and non-EPUB formats, is copied to an independent,
+   verified library-folder backup before any book is replaced.
+6. Review per-book results. EPUBs keep their exact names and relative paths;
+   unsuccessful books retain their original bytes. Cancellation takes effect
+   between operations. Backups are retained until you manage them explicitly.
+7. Click **Resume previous watching states** when ready. Watching remains paused
+   after job completion and application restarts until this explicit action.
+   Reconnect to the same Grimmory instance after a restart to recover the saved
+   session. Libraries whose watching was originally disabled remain disabled.
+
+Only explicit pause/resume clicks update library watching. The API writes preserve
+all other library settings and do not write source metadata or change book paths.
+Connecting, refreshing status, and starting or finishing jobs never automatically
+pause or resume watching. This is per-library watching control, not a complete
+Grimmory maintenance mode; external writers still require your confirmation.
+
+The library mode preserves the EPUB's bibliographic metadata and identifiers,
+including existing optimizer markers. Metadata repairs are disabled and the
+finished archive is checked for protected metadata changes before publication.
+CSS, fonts, content presentation, and navigation may still be normalized, so
+file bytes and hashes change. Official EPUBCheck must be available before a
+library original can be replaced; pre-existing validation issues may remain
+reported as `legacy_issues`.
+
+Restore is an explicit action on a retained library-folder backup. Snapshot
+integrity and live-file conflicts are checked before restoration. External
+edits, additions, or missing files require resolution rather than silently
+overwriting unrelated changes.
+Interrupted jobs are reported instead of resuming automatically. Restore can
+reconcile verified temporary files recorded by a job; incomplete or externally
+changed temporary files remain untouched and require manual inspection.
+
+**Backup scope:** library folders only. Grimmory's database and application data
+(including catalog state, shelves, and reading progress) are not backed up or
+restored by this feature. Preserve those with your normal Grimmory backup
+procedure. A verified folder copy is not an atomic filesystem or database
+snapshot and requires the maintenance window above for consistency. The
+optimizer only updates library watching through its API; it does not update book
+metadata or paths, but a later scan
+can observe the changed EPUBs.
+
+The upstream API is unstable; the connection uses the documented login and
+library-discovery and per-library settings endpoints. See the
+[implementation contract](docs/grimmory-library-workflow.md) for the preservation
+and recovery boundaries. Development tests use temporary libraries and mocked
+Grimmory responses, never a live library.
+
 ## Run
 
 ```bash

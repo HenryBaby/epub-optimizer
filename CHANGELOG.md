@@ -7,18 +7,37 @@
 
 This version is under development and is not a stable release.
 
+### Changed
+
+- Choose a backup snapshot from a dropdown, review its folder scope, and restore
+  it with one explicit action after confirming maintenance.
+- Bring Grimmory maintenance into one guided workbench with contextual folder,
+  preparation, progress, and review steps, plus persistent watching recovery.
+- Put navigation before content and show the upload queue only in Optimizer and
+  Analyze. Group past runs and backups into a single expandable activity area.
+- Keep folder drafts and result disclosures stable during status updates, show
+  failures first, and add accessible busy states and reduced-motion support.
+
 ### Added
 
 - Add manual Grimmory library discovery for mapped folders and full-folder
   backups, with restore support and no automatic runs.
-- Add strict metadata preservation for library jobs while retaining exact
-  filenames and folder layouts. Folder backups exclude Grimmory's database and
-  application state.
+- Preserve strict metadata for library jobs and exact filenames and folder
+  layouts; exclude Grimmory's database and application state from folder
+  backups.
+- Add explicit pause and restore controls for Grimmory library folder watching,
+  with saved original settings and recovery records.
 
 ### Fixed
 
-- Recognize multi-paragraph opening epigraphs, correct stale paragraph roles,
-  and preserve the following narrative flow.
+- Preserve containers around orphan list items and legacy pagebreak elements on
+  reruns, avoiding newly introduced EPUBCheck phrasing-content errors.
+- Explain Grimmory backup filesystem failures with sanitized operation and errno
+  diagnostics, including ownership preservation, permissions, space, and sync.
+- Preserve multi-paragraph opening epigraphs, correct stale paragraph roles and
+  classes, and maintain narrative flow.
+- Allow an explicit public browser origin for Grimmory actions behind a reverse
+  proxy, with normalized hostnames and default ports.
 
 ## 1.2.8 - 2026-10-29
 

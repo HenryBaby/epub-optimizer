@@ -13,6 +13,7 @@ from contextlib import suppress
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path, PurePosixPath
 from urllib.parse import unquote, urlsplit
+from zipfile import ZipFile
 
 from lxml import etree
 
@@ -178,6 +179,7 @@ def optimize_epub(
     max_size_bytes: int | None = None,
     progress: Callable[[str], None] | None = None,
     preserve_publisher_css: bool = False,
+    preserve_metadata: bool = False,
     epubcheck: EpubCheckRunner | None = None,
 ) -> OptimizationResult:
     started = time.perf_counter()
@@ -215,6 +217,7 @@ def optimize_epub(
 
         package_tree = _parse_xml(package_file)
         package_root = package_tree.getroot()
+        original_metadata = _protected_metadata(package_root) if preserve_metadata else None
         epub_version = package_root.attrib.get("version")
 
         manifest = _find_child(package_root, "manifest")
@@ -310,7 +313,8 @@ def optimize_epub(
             _append_log(log, "Generated missing EPUB 3 navigation document.", progress)
 
         _append_log(log, f"Processed {processed_docs} content document(s).", progress)
-        _ensure_optimizer_marker(package_root)
+        if not preserve_metadata:
+            _ensure_optimizer_marker(package_root)
         _write_xml(package_tree, package_file)
         repair_actions: list[str] = []
         _write_change_manifest(
@@ -349,6 +353,7 @@ def optimize_epub(
                 package_path,
                 package_tree,
                 epubcheck_output.errors,
+                preserve_metadata=preserve_metadata,
             )
             repair_actions.extend(pass_actions)
             if not pass_actions:
@@ -465,6 +470,8 @@ def optimize_epub(
             output_check_message,
             progress,
         )
+        if preserve_metadata:
+            _assert_preserved_metadata(staged_output_path, package_path, original_metadata)
         _publish_output(staged_output_path, output_path)
 
     elapsed = time.perf_counter() - started
@@ -489,6 +496,57 @@ def optimize_epub(
         validation_remaining=validation_remaining,
         validation_persisting=validation_persisting,
     )
+
+
+def _protected_metadata(package_root: etree._Element) -> tuple:
+    """Capture XML values and namespace context without depending on XML formatting.
+
+    Keep namespace bindings as well as expanded names: custom metadata can contain
+    QName-valued text or attributes whose meaning depends on those bindings.
+    Attribute ordering and quote/entity serialization are not bibliographic data.
+    """
+    def node_value(node: etree._Element) -> tuple:
+        if isinstance(node.tag, str):
+            identity = ("element", node.tag)
+        elif isinstance(node, etree._ProcessingInstruction):
+            identity = ("pi", node.target)
+        elif isinstance(node, etree._Comment):
+            identity = ("comment",)
+        else:
+            identity = ("entity", node.name)
+        return (
+            identity,
+            tuple(sorted(node.attrib.items())),
+            tuple(sorted((prefix or "", uri) for prefix, uri in node.nsmap.items())),
+            node.text,
+            tuple((node_value(child), child.tail) for child in node),
+        )
+
+    metadata = [
+        node_value(child)
+        for child in package_root
+        if child.tag in {f"{{{OPF_NS}}}metadata", "metadata"}
+    ]
+    return (
+        # Root attributes include the identifier/vocabulary declarations and
+        # inherited xml:lang/xml:base context that gives metadata its meaning.
+        tuple(sorted(package_root.attrib.items())),
+        tuple(metadata),
+    )
+
+
+def _assert_preserved_metadata(
+    staged_output: Path, package_path: str, original_metadata: tuple | None
+) -> None:
+    # Read the finished archive, rather than the mutable workspace tree: packaging
+    # and report embedding are also inside the preservation boundary.
+    with ZipFile(staged_output) as archive:
+        root = etree.fromstring(
+            archive.read(package_path),
+            etree.XMLParser(resolve_entities=False, no_network=True, recover=False),
+        )
+    if _protected_metadata(root) != original_metadata:
+        raise InvalidEpubError("Protected EPUB metadata changed; output not published")
 
 
 def _raise_for_introduced_epubcheck_errors(comparison) -> None:
@@ -1957,9 +2015,10 @@ def _normalize_inline_spans(root: etree._Element) -> None:
             span.attrib.pop("class", None)
 
 
-# Non-phrasing flow elements from both XHTML 1.1 and EPUB 3's HTML vocabulary.
-# Keep this shared with block-child detection so a containing div cannot later
-# be mistaken for a paragraph or heading.
+# Non-phrasing elements, including source-only structural sentinels such as
+# orphan li and legacy pagebreak. These are not all valid flow vocabulary:
+# preserve their containers rather than compound source defects with a generated
+# paragraph or heading. Keep body normalization and block-child detection shared.
 _BLOCK_FLOW_ELEMENTS = {
     "address",
     "article",
@@ -1984,11 +2043,13 @@ _BLOCK_FLOW_ELEMENTS = {
     "header",
     "hgroup",
     "hr",
+    "li",
     "main",
     "menu",
     "nav",
     "ol",
     "p",
+    "pagebreak",
     "pre",
     "search",
     "section",
@@ -2099,11 +2160,18 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
     is_front_matter = document_role in {"dedication", "front", "title", "works"}
     title_line_index = 0
     metadata_line_index = 0
-    opening_epigraph = False
+    epigraph_paragraphs = _opening_epigraph_paragraphs(root, document_role)
+    epigraph_narrative_pending = False
     for element in root.xpath("//*[local-name()='body']//*[self::*]"):
         local = etree.QName(element).localname.lower()
         source_classes = set(element.attrib.get("class", "").lower().split())
+        if element in epigraph_paragraphs:
+            _replace_classes(element, "eo-extract")
+            after_boundary = True
+            epigraph_narrative_pending = True
+            continue
         if local in {"h1", "h2", "h3", "h4", "h5", "h6"}:
+            epigraph_narrative_pending = False
             existing_role = _existing_optimizer_block_role(source_classes)
             if existing_role and not _should_reclassify_heading_role(
                 existing_role,
@@ -2113,7 +2181,6 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
             ):
                 _replace_classes(element, existing_role)
                 after_boundary = _role_creates_boundary(existing_role)
-                opening_epigraph = False
                 continue
             if document_role == "toc":
                 _replace_classes(element, "eo-toc-heading")
@@ -2128,19 +2195,30 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
             if document_role == "works":
                 _replace_classes(element, "eo-front")
                 after_boundary = True
-                opening_epigraph = False
                 continue
             if document_role == "metadata":
                 role = _metadata_line_role(element, metadata_line_index)
                 metadata_line_index += 1
                 _replace_classes(element, role)
                 after_boundary = True
-                opening_epigraph = False
                 continue
             _replace_classes(element, _heading_role(local, source_classes, is_front_matter))
             after_boundary = True
-            opening_epigraph = False
             continue
+
+        if local == "p" and epigraph_narrative_pending:
+            epigraph_narrative_pending = False
+            # Reoptimization may encounter the old eo-body here. Recompute only
+            # narrative roles; explicit letters, poetry and other insets win.
+            prose_classes = source_classes - {"eo-first", "eo-body"}
+            if (
+                _existing_optimizer_block_role(source_classes) in {None, "eo-first", "eo-body"}
+                and not _has_ancestor_class(element, "eo-letter")
+                and _paragraph_role(element, prose_classes, True, False) == "eo-first"
+            ):
+                _replace_classes(element, "eo-first")
+                after_boundary = False
+                continue
 
         existing_role = _existing_optimizer_block_role(source_classes)
         if existing_role and local in {
@@ -2156,7 +2234,6 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
         }:
             _replace_classes(element, existing_role)
             after_boundary = _role_creates_boundary(existing_role)
-            opening_epigraph = existing_role in {"eo-extract", "eo-scene-break"}
             continue
 
         if local in {"ol", "ul"}:
@@ -2232,16 +2309,6 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
                 _replace_classes(element, role)
                 after_boundary = True
                 continue
-            if after_boundary and not is_front_matter and _is_opening_epigraph_paragraph(element):
-                _replace_classes(element, "eo-extract")
-                after_boundary = True
-                opening_epigraph = True
-                continue
-            if opening_epigraph and _is_opening_epigraph_attribution(element):
-                _replace_classes(element, "eo-extract")
-                after_boundary = True
-                opening_epigraph = False
-                continue
             role = _paragraph_role(element, source_classes, after_boundary, is_front_matter)
             _replace_classes(element, role)
             after_boundary = role in {
@@ -2255,7 +2322,6 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
                 "eo-poetry",
                 "eo-scene-break",
             }
-            opening_epigraph = role in {"eo-extract", "eo-scene-break"}
             continue
 
         if local == "div" and _is_direct_body_child(element):
@@ -2288,12 +2354,10 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
                     _rename_element(element, "h1")
                     _replace_classes(element, role)
                     after_boundary = True
-                    opening_epigraph = False
                 else:
                     if role == "eo-image" or _has_block_children(element):
                         _replace_classes(element, role)
                         after_boundary = True
-                        opening_epigraph = False
                         continue
                     _rename_element(element, "p")
                     _replace_classes(element, role)
@@ -2317,7 +2381,6 @@ def _classify_blocks(root: etree._Element, document_role: str) -> None:
                         "eo-toc-chapter",
                         "eo-toc-part",
                     }
-                    opening_epigraph = role in {"eo-extract", "eo-scene-break"}
                 continue
 
         if local == "div" and document_role == "front":
@@ -2599,6 +2662,91 @@ def _dedication_line_role(element: etree._Element, after_boundary: bool) -> str:
     if after_boundary and text.lower() in {"dedication", "dedicated to"}:
         return "eo-front"
     return "eo-dedication"
+
+
+def _opening_epigraph_paragraphs(
+    root: etree._Element, document_role: str
+) -> set[etree._Element]:
+    """Find bounded opening quotations before trusting old optimizer classes.
+
+    A multi-paragraph quotation needs an attribution in the same sibling run.
+    Container edges, headings and other blocks cannot connect unrelated italics.
+    Preserve the legacy single-paragraph opening heuristic, but never use it to
+    accept an ambiguous run of multiple italic paragraphs without a source.
+    """
+    if document_role in {"dedication", "front", "title", "works", "toc", "metadata", "part"}:
+        return set()
+    headings = {"h1", "h2", "h3", "h4", "h5", "h6"}
+    blocks = [
+        element
+        for element in root.xpath("//*[local-name()='body']//*")
+        if _local_name(element) in headings | {
+            "p", "blockquote", "aside", "figure", "ol", "ul", "hr", "img"
+        }
+        or (_local_name(element) == "div" and not _has_block_children(element))
+    ]
+    result = set()
+    for index, first in enumerate(blocks):
+        if index and _local_name(blocks[index - 1]) not in headings:
+            continue
+        if _local_name(first) != "p":
+            continue
+        if any(
+            _local_name(ancestor) in {"blockquote", "aside", "figure", "ol", "ul"}
+            or (
+                _existing_optimizer_block_role(
+                    set(ancestor.get("class", "").lower().split())
+                )
+                or _container_role(set(ancestor.get("class", "").lower().split()))
+            )
+            in {"eo-letter", "eo-poetry", "eo-footnote"}
+            for ancestor in first.iterancestors()
+        ):
+            continue
+        quote = []
+        total_length = 0
+        current = first
+        # At most eight quote paragraphs plus a short source line, and no more
+        # than 3,600 quote characters. Long italic narrative must remain prose.
+        for _ in range(9):
+            if current is None or _local_name(current) != "p":
+                break
+            classes = set(current.get("class", "").lower().split())
+            if (
+                _existing_optimizer_block_role(classes)
+                not in {None, "eo-first", "eo-body", "eo-right", "eo-extract"}
+                or _letter_paragraph_role(classes)
+                or _is_letter_attribution(classes)
+                or _is_scene_break(current)
+                or _contains_descendant_image(current)
+                or _paragraph_role(current, classes - EO_BLOCK_ROLES, False, False)
+                in {"eo-poetry", "eo-footnote", "eo-caption", "eo-hanging"}
+            ):
+                break
+            if quote and _is_opening_epigraph_attribution(current):
+                result.update([*quote, current])
+                break
+            text = _normalized_text(current)
+            if not text or len(text) > 900 or _emphasized_text_ratio(current) < 0.65:
+                break
+            quote.append(current)
+            total_length += len(text)
+            if len(quote) > 8 or total_length > 3600:
+                break
+            current = current.getnext()
+        following = first.getnext()
+        has_italic_continuation = (
+            following is not None
+            and _local_name(following) == "p"
+            and _emphasized_text_ratio(following) >= 0.65
+        )
+        if (
+            len(quote) == 1
+            and not has_italic_continuation
+            and _is_opening_epigraph_paragraph(first)
+        ):
+            result.add(first)
+    return result
 
 
 def _is_opening_epigraph_paragraph(element: etree._Element) -> bool:

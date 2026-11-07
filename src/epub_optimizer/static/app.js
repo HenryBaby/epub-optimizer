@@ -784,6 +784,8 @@ function activateTab(tabName) {
     panel.hidden = !isActive;
   }
 
+  document.querySelector("#upload-queue").hidden = !["optimizer", "analyze"].includes(nextTab);
+
   localStorage.setItem(STORAGE_KEYS.tab, nextTab);
 }
 
@@ -1219,3 +1221,513 @@ function downloadJson(filename, value) {
   link.remove();
   URL.revokeObjectURL(url);
 }
+
+// Grimmory is manual-only. Status reads never connect, scan, or start a job.
+(() => {
+  const panel = document.querySelector('[data-tab-panel="grimmory"]');
+  if (!panel) return;
+  const find = (name) => document.querySelector(`#grimmory-${name}`);
+  const connectForm = find("connect-form");
+  const mappingList = find("mappings");
+  const maintenance = find("maintenance");
+  let state = {};
+  let plan = null;
+  let busy = false;
+  let pollTimer = null;
+  let mappings = [];
+  let mappingsBaseUrl = null;
+  let choosingFolders = false;
+  let busyAction = "";
+  let selectedSnapshotId = "";
+  const renderSignatures = new Map();
+
+  function message(text, error = false) {
+    const target = find("message");
+    target.textContent = text;
+    target.hidden = !text;
+    target.classList.toggle("is-error", error);
+    target.setAttribute("role", error ? "alert" : "status");
+  }
+
+  // Reuse unchanged sections and restore disclosure state when status advances.
+  function renderChanged(name, value, callback) {
+    const signature = JSON.stringify(value);
+    if (renderSignatures.get(name) === signature) return;
+    const target = find(name);
+    const focused = target.contains(document.activeElement) ? document.activeElement : null;
+    const focusedKey = focused?.closest("details")?.dataset.key;
+    const focusedTag = focused?.tagName;
+    const open = new Map(Array.from(target.querySelectorAll("details")).map((node) => [node.dataset.key, node.open]));
+    callback(target);
+    target.querySelectorAll("details").forEach((node) => {
+      if (open.has(node.dataset.key)) node.open = open.get(node.dataset.key);
+      if (focusedKey && node.dataset.key === focusedKey && focusedTag) {
+        node.querySelector(focusedTag.toLowerCase())?.focus({ preventScroll: true });
+      }
+    });
+    renderSignatures.set(name, signature);
+  }
+
+  function currentJob() {
+    if (state.active_job && typeof state.active_job === "object") return state.active_job;
+    return state.job || state.jobs?.find((job) => job.id === state.active_job) || state.jobs?.at(-1);
+  }
+
+  function element(tag, text, className) {
+    const node = document.createElement(tag);
+    if (text !== undefined) node.textContent = String(text);
+    if (className) node.className = className;
+    return node;
+  }
+
+  function active() {
+    const job = currentJob() || {};
+    return state.running === true || Boolean(state.active_job) || state.active === true || job.active === true ||
+      ["backing_up", "backup", "optimizing", "restoring", "running", "cancelling"].includes(job.phase || job.status);
+  }
+
+  function updateControls() {
+    const locked = busy || active();
+    connectForm.querySelectorAll("input, button").forEach((node) => { node.disabled = locked; });
+    mappingList.querySelectorAll("input").forEach((node) => { node.disabled = locked; });
+    maintenance.disabled = locked;
+    find("preview").disabled = locked || !state.connected || !mappings.some((row) => row.selected.checked);
+    const receipt = state.watcher_maintenance;
+    const pendingReceipt = receipt && receipt.status !== "resumed";
+    const selectedIds = selectedLibraryIds();
+    const sameSelection = pendingReceipt && receipt.base_url === state.base_url &&
+      receipt.libraries.length === selectedIds.length && receipt.libraries.every((library) => selectedIds.includes(library.library_id));
+    find("pause-watching").disabled = locked || !state.connected || !selectedIds.length ||
+      (pendingReceipt && (!sameSelection || receipt.libraries.some((library) => ["resume_pending", "restored"].includes(library.status))));
+    find("resume-watching").disabled = locked || !state.connected || !pendingReceipt || receipt.base_url !== state.base_url;
+    find("start").disabled = locked || !plan?.plan_id || !maintenance.checked;
+    find("cancel").disabled = busy || !active();
+    find("refresh").disabled = busy;
+    find("snapshot-select").disabled = locked || !state.connected || !availableSnapshots().length;
+    find("restore").disabled = locked || !state.connected || !maintenance.checked || !restorableSnapshot();
+    find("edit-folders").disabled = locked;
+    find("new-run").disabled = locked;
+    const selected = mappings.filter((row) => row.selected.checked).length;
+    find("selection-count").textContent = `${selected} selected`;
+    const hasJob = Boolean(currentJob()) && !choosingFolders;
+    const step = active() ? "run" : !state.connected ? "connect" : plan ? "prepare" : hasJob ? "review" : "folders";
+    panel.dataset.uiPhase = step;
+    panel.classList.toggle("is-busy", busy || active());
+    panel.setAttribute("aria-busy", String(busy));
+    panel.querySelectorAll("[data-step]").forEach((node) => {
+      if (node.dataset.step === step) node.setAttribute("aria-current", "step");
+      else node.removeAttribute("aria-current");
+    });
+    find("folder-step").hidden = step !== "folders";
+    find("prepare-step").hidden = step !== "prepare";
+    const watchingActions = find(step === "prepare" ? "prepare-actions" : "folder-actions");
+    if (find("pause-watching").parentElement !== watchingActions) watchingActions.append(find("pause-watching"));
+    find("progress").hidden = !["run", "review"].includes(step);
+    find("maintenance-confirmation").hidden = !plan && !find("past-activity").open;
+    find("start").hidden = step !== "prepare";
+    find("cancel").hidden = !active();
+    find("review-actions").hidden = step !== "review";
+    find("next-step").textContent = {
+      connect: "Connect to choose the folders you want to optimize.",
+      folders: "Choose folders, pause watching, then preview the backup scope.",
+      prepare: "Review the scope and confirm writers are paused before starting.",
+      run: "Keep writers paused while your library is being maintained.",
+      review: "Review the outcome, then explicitly resume previous watching states.",
+    }[step];
+    const labels = {
+      preview: "Preview folders", "pause-watching": "Pause watching",
+      "resume-watching": "Resume watching", start: "Back up & optimize", cancel: "Cancel safely",
+    };
+    for (const [name, label] of Object.entries(labels)) {
+      find(name).textContent = busy && busyAction === name ? "Working…" : label;
+      find(name).classList.toggle("is-loading", busy && busyAction === name);
+    }
+    const submit = connectForm.querySelector('button[type="submit"]');
+    submit.textContent = busy && busyAction === "connect" ? "Connecting…" : "Connect";
+  }
+
+  function invalidatePlan() {
+    plan = null;
+    find("plan").hidden = true;
+    maintenance.checked = false;
+    updateControls();
+  }
+
+  function renderMappings() {
+    const drafts = mappingsBaseUrl === state.base_url ? mappings.map((row) => ({
+      library_id: row.library_id, remote_path: row.remote_path,
+      checked: row.selected.checked, local_path: row.local.value,
+    })) : [];
+    mappingsBaseUrl = state.base_url;
+    mappingList.replaceChildren();
+    mappings = [];
+    for (const library of state.libraries || []) {
+      for (const remote of library.paths || []) {
+        const remotePath = typeof remote === "string" ? remote : remote.path;
+        const row = element("div", undefined, "grimmory-mapping");
+        const label = element("label", undefined, "filename-option");
+        const selected = document.createElement("input");
+        selected.type = "checkbox";
+        selected.setAttribute("aria-label", `Select ${library.name}: ${remotePath}`);
+        const badge = element("span", library.watch === false ? "Watching off" : library.watch === true ? "Watching on" : "Watching unknown", "watch-badge");
+        badge.dataset.libraryId = String(library.id);
+        label.append(selected, element("strong", library.name), badge);
+        const paths = element("div", undefined, "mapping-paths");
+        paths.append(element("p", `Grimmory · ${remotePath}`, "notice"));
+        const field = element("label", "Mounted path", "field-row");
+        const local = document.createElement("input");
+        local.type = "text";
+        local.placeholder = "/libraries/books";
+        local.autocomplete = "off";
+        const draft = drafts.find((mapping) =>
+          mapping.library_id === library.id && mapping.remote_path === remotePath);
+        const saved = (state.mappings || []).find((mapping) =>
+          mapping.library_id === library.id && mapping.remote_path === remotePath);
+        if (draft) {
+          selected.checked = draft.checked;
+          local.value = draft.local_path;
+        } else if (saved) {
+          selected.checked = true;
+          local.value = saved.local_path;
+        }
+        field.append(local);
+        paths.append(field);
+        row.append(label, paths);
+        mappingList.append(row);
+        mappings.push({ library_id: library.id, remote_path: remotePath, selected, local });
+        selected.addEventListener("change", invalidatePlan);
+        local.addEventListener("input", invalidatePlan);
+      }
+    }
+    if (!mappings.length) mappingList.append(element("p", "No library folders discovered. Connect to Grimmory to continue.", "notice"));
+  }
+
+  function selectedLibraryIds() {
+    return [...new Set(mappings.filter((row) => row.selected.checked).map((row) => row.library_id))];
+  }
+
+  function renderWatcherMaintenance() {
+    const target = find("watcher-maintenance");
+    target.replaceChildren();
+    const receipt = state.watcher_maintenance;
+    find("watching").hidden = !receipt;
+    if (!receipt) return;
+    const pending = receipt.status !== "resumed";
+    find("watching").classList.toggle("watching-pending", pending);
+    find("resume-watching").hidden = !pending;
+    const heading = !pending ? "Previous watching states restored" : receipt.status === "paused" ? "Watching paused" : "Watching needs your attention";
+    target.append(element("h3", heading));
+    const list = element("ul");
+    for (const library of receipt.libraries || []) {
+      const labels = {
+        paused: "Watching paused", already_disabled: "Watching was already disabled",
+        failed: "Watching update failed", unmodified: "Watching was already disabled",
+        pause_pending: "Pause not yet verified", resume_pending: "Resume not yet verified", resumed: "Previous watching state restored",
+        restored: "Previous watching state restored", pending: "Awaiting watching update",
+      };
+      list.append(element("li", `${library.name || `Library ${library.library_id}`} — ${labels[library.status] || library.status}${library.error ? `: ${library.error}` : ""}`));
+    }
+    if (receipt.libraries?.some((library) => library.error)) list.setAttribute("role", "alert");
+    target.append(list);
+    if (pending) {
+      target.append(element("p", "Watching stays paused after completion and restarts. Resume restores previous settings."));
+      if (!state.connected || receipt.base_url !== state.base_url) {
+        target.append(element("p", `Reconnect to ${receipt.base_url} to resume the saved previous watching states.`));
+      }
+    }
+  }
+
+  function renderPlan() {
+    const target = find("plan");
+    target.replaceChildren();
+    target.hidden = !plan;
+    if (!plan) return;
+    target.append(element("h3", "Backup preview"));
+    renderScope(target, plan);
+  }
+
+  function renderScope(target, preview) {
+    target.append(element("p", `${preview.epub_count || 0} EPUBs to optimize · ${preview.files || 0} files to back up · ${formatBytes(preview.bytes || 0)}`));
+    const scope = element("ul", undefined, "change-report");
+    for (const mapping of preview.mappings || []) {
+      scope.append(element("li", `${mapping.remote_path} → ${mapping.local_path} (optimizer container)`));
+    }
+    target.append(scope);
+  }
+
+  function renderJob(target, job) {
+    const results = job.results || [];
+    const finished = results.filter((item) => ["optimized", "restored"].includes(item.status)).length;
+    const failed = results.filter((item) => item.status === "failed").length;
+    const phases = {
+      backing_up: "Backing up and verifying library folders",
+      running: "Optimizing EPUBs",
+      restoring: "Restoring library folders",
+      completed: "Completed",
+      cancelled: "Cancelled safely",
+      failed: "Failed",
+      interrupted: "Interrupted; review the snapshot before continuing",
+    };
+    target.append(element("h3", job.status === "completed" && failed ? "Completed with issues" : phases[job.phase || job.status] || job.phase || job.status || "Idle"));
+    if (results.length) target.append(element("p", `${finished} completed · ${failed} failed`, failed ? "warnings" : undefined));
+    if (active() && job === currentJob()) {
+      const meter = element("div", undefined, "meter grimmory-meter");
+      meter.setAttribute("role", "progressbar");
+      meter.setAttribute("aria-label", "Library maintenance in progress");
+      const total = (job.phase || job.status) === "backing_up" ? null : job.plan?.epub_count || plan?.epub_count;
+      if (total) {
+        meter.setAttribute("aria-valuemin", "0");
+        meter.setAttribute("aria-valuemax", String(total));
+        meter.setAttribute("aria-valuenow", String(Math.min(total, results.length)));
+      } else meter.classList.add("is-indeterminate");
+      const fill = element("span");
+      fill.style.width = total ? `${Math.min(100, results.length / total * 100)}%` : "35%";
+      meter.append(fill);
+      target.append(meter);
+    }
+    if (job.message) target.append(element("p", job.message));
+    if (results.length) {
+      if (failed) {
+        const failures = element("div", undefined, "grimmory-failures");
+        failures.setAttribute("role", "alert");
+        failures.append(element("h4", `${failed} ${failed === 1 ? "file needs" : "files need"} attention`));
+        const list = element("ul", undefined, "change-report");
+        results.filter((result) => result.status === "failed").forEach((result) => {
+          list.append(element("li", `${result.path || result.filename || "File"}${result.message ? ` — ${result.message}` : ""}`));
+        });
+        failures.append(list);
+        target.append(failures);
+      }
+      const details = element("details", undefined, "failure-details");
+      details.dataset.key = `results-${job.id || job.job_id || "current"}`;
+      details.append(element("summary", `Per-file results (${results.length})`));
+      const list = element("ul", undefined, "change-report");
+      for (const result of [...results].sort((left, right) => Number(right.status === "failed") - Number(left.status === "failed"))) {
+        list.append(element("li", `${result.path || result.filename || "File"} — ${result.status}${result.message ? `: ${result.message}` : ""}`));
+      }
+      details.append(list);
+      target.append(details);
+      if (active()) target.append(element("p", `Latest file: ${results.at(-1).path || results.at(-1).filename || "Preparing"}`));
+    }
+  }
+
+  function availableSnapshots() {
+    return (state.snapshots || []).filter((record) => record.snapshot_id || record.id);
+  }
+
+  function selectedSnapshot() {
+    return availableSnapshots().find((record) => String(record.snapshot_id || record.id) === selectedSnapshotId);
+  }
+
+  function restorableSnapshot() {
+    const record = selectedSnapshot();
+    return record && (!record.plan?.base_url || record.plan.base_url === state.base_url) ? record : null;
+  }
+
+  function snapshotDate(record) {
+    return record.created_at ? new Date(record.created_at * 1000).toLocaleString() : "Date unavailable";
+  }
+
+  function renderSnapshotDetails() {
+    const target = find("snapshot-details");
+    target.replaceChildren();
+    const record = selectedSnapshot();
+    if (!record) return;
+    target.append(element("p", `${snapshotDate(record)} · Snapshot status: ${record.status || "available"}`));
+    const scope = record.plan || {};
+    target.append(element("p", `${(scope.mappings || []).length} folders · ${scope.epub_count || 0} EPUBs · ${scope.files || 0} files · ${formatBytes(scope.bytes || 0)}`));
+    const folders = element("ul", undefined, "change-report");
+    for (const mapping of scope.mappings || []) {
+      folders.append(element("li", `${mapping.remote_path} → ${mapping.local_path} (optimizer container)`));
+    }
+    target.append(folders);
+    const technical = element("details", undefined, "grimmory-help");
+    technical.append(element("summary", "Snapshot ID"), element("p", record.snapshot_id || record.id, "technical-id"));
+    target.append(technical);
+    if (!restorableSnapshot()) target.append(element("p", "Connect to the Grimmory instance used by this snapshot before restoring.", "notice"));
+  }
+
+  function renderSnapshots() {
+    const select = find("snapshot-select");
+    const records = availableSnapshots().slice().sort((left, right) => (right.created_at || 0) - (left.created_at || 0));
+    if (selectedSnapshotId && !selectedSnapshot()) {
+      selectedSnapshotId = "";
+      maintenance.checked = false;
+    }
+    select.replaceChildren(element("option", "Choose a snapshot"));
+    select.firstElementChild.value = "";
+    for (const record of records) {
+      const scope = record.plan || {};
+      const id = String(record.snapshot_id || record.id);
+      const option = element("option", `${snapshotDate(record)} · ${(scope.mappings || []).length} folders · ${scope.epub_count || 0} EPUBs · ${id.slice(0, 12)}`);
+      option.value = id;
+      select.append(option);
+    }
+    select.value = selectedSnapshotId;
+    find("snapshot-empty").hidden = records.length > 0;
+    renderSnapshotDetails();
+  }
+
+  function renderRecords(target, records) {
+    target.replaceChildren();
+    for (const record of records || []) {
+      const card = element("details", undefined, "grimmory-record");
+      card.dataset.key = `run-${record.snapshot_id || record.id || record.job_id}`;
+      const date = record.created_at ? new Date(record.created_at * 1000).toLocaleString() : "Date unavailable";
+      card.append(element("summary", `Run · ${date} · ${record.status || record.phase || "available"}`));
+      card.append(element("p", `ID: ${record.snapshot_id || record.id || record.job_id || "Unavailable"}`, "technical-id notice"));
+      renderJob(card, record);
+      target.append(card);
+    }
+    if (!target.childElementCount) target.append(element("p", "No records yet.", "notice"));
+  }
+
+  function render(next, refreshMappings = false) {
+    const wasConnected = state.connected;
+    state = next;
+    find("pill").textContent = active() ? "Maintenance active" : (state.connected ? "Connected" : "Disconnected");
+    if (refreshMappings) renderMappings();
+    // Watch changes update badges without replacing the inputs or their drafts.
+    mappingList.querySelectorAll(".watch-badge").forEach((badge) => {
+      const library = (state.libraries || []).find((item) => String(item.id) === badge.dataset.libraryId);
+      badge.textContent = library?.watch === false ? "Watching off" : library?.watch === true ? "Watching on" : "Watching unknown";
+    });
+    find("connection-summary").textContent = state.connected ? `Connected · ${state.base_url || "Grimmory"}` : "Connect to Grimmory";
+    if (state.connected && !wasConnected) find("connection").open = false;
+    if (!state.connected) find("connection").open = true;
+    renderChanged("watcher-maintenance", [state.watcher_maintenance, state.connected, state.base_url], renderWatcherMaintenance);
+    renderChanged("progress", [currentJob(), active()], (progress) => {
+      progress.replaceChildren();
+      if (currentJob()) renderJob(progress, currentJob());
+    });
+    renderChanged("history", state.history || state.jobs || [], (target) => renderRecords(target, state.history || state.jobs));
+    renderChanged("snapshots", [state.snapshots || [], state.base_url], renderSnapshots);
+    find("activity-count").textContent = `${(state.history || state.jobs || []).length} runs · ${(state.snapshots || []).length} backups`;
+    updateControls();
+    clearTimeout(pollTimer);
+    if (active()) pollTimer = setTimeout(loadStatus, 1500);
+  }
+
+  async function request(path, payload) {
+    const response = await fetch(`/grimmory${path}`, payload === undefined ? {
+      cache: "no-store",
+    } : {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      cache: "no-store",
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.detail || "Grimmory request failed.");
+    return result;
+  }
+
+  async function loadStatus() {
+    try {
+      render(await request(""), mappings.length === 0);
+    } catch (error) {
+      message(error.message, true);
+      clearTimeout(pollTimer);
+    }
+  }
+
+  async function run(action, payload) {
+    busy = true;
+    busyAction = action;
+    message("");
+    updateControls();
+    try {
+      const result = await request(`/${action}`, payload);
+      if (action === "preview") {
+        choosingFolders = false;
+        plan = result;
+        renderPlan();
+      } else if (["connect", "pause-watching", "resume-watching"].includes(action)) {
+        if (action === "connect") choosingFolders = true;
+        invalidatePlan();
+        maintenance.checked = false;
+      } else if (action === "start" || action === "restore") {
+        choosingFolders = false;
+        invalidatePlan();
+        maintenance.checked = false;
+      }
+      if (["connect", "pause-watching", "resume-watching"].includes(action)) render(result, true);
+      else render(await request(""));
+      if (action === "preview") message("Preview ready. Confirm maintenance before starting.");
+      else if (action === "pause-watching") {
+        const receipt = state.watcher_maintenance;
+        const paused = receipt?.status === "paused" && !receipt.libraries?.some((library) => library.error);
+        message(paused ? "Watching paused. Preview folders to continue." : "Watching updated. Review any watching errors, then preview folders again to confirm the current scope.");
+      }
+    } catch (error) {
+      message(error.message, true);
+    } finally {
+      busy = false;
+      updateControls();
+    }
+  }
+
+  connectForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const payload = {
+      base_url: find("url").value,
+      username: find("username").value,
+      password: find("password").value,
+    };
+    find("password").value = "";
+    run("connect", payload);
+  });
+  find("preview").addEventListener("click", () => {
+    invalidatePlan();
+    run("preview", { mappings: mappings.filter((row) => row.selected.checked).map((row) => ({
+      library_id: row.library_id,
+      remote_path: row.remote_path,
+      local_path: row.local.value,
+    })) });
+  });
+  find("pause-watching").addEventListener("click", () => {
+    const libraryIds = selectedLibraryIds();
+    if (busy || active() || !state.connected || !libraryIds.length) return;
+    invalidatePlan();
+    maintenance.checked = false;
+    run("pause-watching", { library_ids: libraryIds });
+  });
+  find("resume-watching").addEventListener("click", () => {
+    const receipt = state.watcher_maintenance;
+    if (busy || active() || !state.connected || !receipt?.session_id || receipt.base_url !== state.base_url) return;
+    invalidatePlan();
+    maintenance.checked = false;
+    run("resume-watching", { session_id: receipt.session_id });
+  });
+  find("start").addEventListener("click", () => {
+    if (!busy && !active() && plan?.plan_id && maintenance.checked) run("start", { plan_id: plan.plan_id, maintenance_confirmed: true });
+  });
+  find("cancel").addEventListener("click", () => { if (!busy && active()) run("cancel", {}); });
+  find("refresh").addEventListener("click", loadStatus);
+  find("snapshot-select").addEventListener("change", (event) => {
+    selectedSnapshotId = event.target.value;
+    maintenance.checked = false;
+    renderSnapshotDetails();
+    updateControls();
+  });
+  find("restore").addEventListener("click", () => {
+    if (busy || active() || !state.connected || !maintenance.checked) return;
+    const record = restorableSnapshot();
+    if (!record) return;
+    const id = record.snapshot_id || record.id;
+    const scope = record.plan || {};
+    const folders = (scope.mappings || []).map((mapping) => `${mapping.remote_path} → ${mapping.local_path}`).join("\n");
+    if (!window.confirm(`Restore library-folder snapshot ${id} (${snapshotDate(record)})?\n${(scope.mappings || []).length} folders · ${scope.epub_count || 0} EPUBs · ${scope.files || 0} files\n${folders}\nFiles covered by this snapshot will be replaced. All writers must remain paused.`)) return;
+    run("restore", { snapshot_id: id, maintenance_confirmed: true });
+  });
+  maintenance.addEventListener("change", updateControls);
+  find("past-activity").addEventListener("toggle", updateControls);
+  function editFolders() {
+    choosingFolders = true;
+    invalidatePlan();
+    message("");
+  }
+  find("edit-folders").addEventListener("click", editFolders);
+  find("new-run").addEventListener("click", editFolders);
+  loadStatus();
+})();

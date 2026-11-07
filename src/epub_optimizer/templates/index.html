@@ -31,7 +31,14 @@
         </label>
       </header>
 
-      <section class="panel queue-panel">
+      <nav class="app-tabs" aria-label="Application sections">
+        <button class="tab-button tab-button-active" type="button" data-tab="optimizer" aria-selected="true">Optimizer</button>
+        <button class="tab-button" type="button" data-tab="analyze" aria-selected="false">Analyze</button>
+        <button class="tab-button" type="button" data-tab="automation" aria-selected="false">Automation</button>
+        <button class="tab-button" type="button" data-tab="grimmory" aria-selected="false">Grimmory</button>
+      </nav>
+
+      <section id="upload-queue" class="panel queue-panel">
         <div class="panel-heading">
           <div>
             <h2>Queue EPUBs</h2>
@@ -66,17 +73,91 @@
         </form>
       </section>
 
-      <nav class="app-tabs" aria-label="Application sections">
-        <button class="tab-button tab-button-active" type="button" data-tab="optimizer" aria-selected="true">
-          Optimizer
-        </button>
-        <button class="tab-button" type="button" data-tab="analyze" aria-selected="false">
-          Analyze
-        </button>
-        <button class="tab-button" type="button" data-tab="automation" aria-selected="false">
-          Automation
-        </button>
-      </nav>
+      <div class="tab-panel" data-tab-panel="grimmory" hidden>
+        <section class="panel grimmory-panel" aria-labelledby="grimmory-heading">
+          <div class="panel-heading">
+            <div>
+              <div class="eyebrow">Library workbench</div>
+              <h2 id="grimmory-heading">Grimmory</h2>
+              <p id="grimmory-next-step">Connect to choose the folders you want to optimize.</p>
+            </div>
+            <span class="status-pill" id="grimmory-pill">Disconnected</span>
+          </div>
+          <ol class="grimmory-steps" aria-label="Maintenance progress">
+            <li data-step="connect" aria-current="step"><span>1</span> Connect</li>
+            <li data-step="folders"><span>2</span> Folders</li>
+            <li data-step="prepare"><span>3</span> Prepare</li>
+            <li data-step="run"><span>4</span> Run</li>
+            <li data-step="review"><span>5</span> Review</li>
+          </ol>
+          <div id="grimmory-message" role="status" aria-live="polite" hidden></div>
+          <details id="grimmory-connection" class="grimmory-connection" open>
+            <summary><span id="grimmory-connection-summary">Connect to Grimmory</span><span class="disclosure-hint">Connection settings</span></summary>
+          <form id="grimmory-connect-form" class="grimmory-grid">
+            <label class="field-row">Grimmory URL
+              <input id="grimmory-url" type="url" placeholder="http://grimmory:6060" required autocomplete="url">
+            </label>
+            <label class="field-row">Username
+              <input id="grimmory-username" type="text" required autocomplete="off">
+            </label>
+            <label class="field-row">Password
+              <input id="grimmory-password" type="password" required autocomplete="off">
+            </label>
+            <button type="submit">Connect</button>
+          </form>
+          <details class="grimmory-help"><summary>Setup help</summary><p>Mount your library folders into this optimizer container first. Use the mounted path below for each Grimmory folder. Connecting only discovers libraries; nothing runs automatically. Watching controls require admin or manage-library permission.</p></details>
+          </details>
+          <aside id="grimmory-watching" class="grimmory-watching" hidden aria-label="Saved watching session">
+            <div id="grimmory-watcher-maintenance" role="status" aria-live="polite"></div>
+            <button id="grimmory-resume-watching" type="button" class="button secondary" disabled>Resume watching</button>
+          </aside>
+          <section id="grimmory-folder-step" class="grimmory-stage" hidden aria-labelledby="grimmory-folders-heading">
+          <div class="stage-heading"><h3 id="grimmory-folders-heading">Choose your folders</h3><span id="grimmory-selection-count" class="notice">0 selected</span></div>
+          <div id="grimmory-mappings" class="results-list"><p class="notice">Connect to discover library folders.</p></div>
+          <p class="notice">Pausing watching affects every folder in each selected library.</p>
+          <div id="grimmory-folder-actions" class="grimmory-actions">
+            <button id="grimmory-preview" type="button" disabled>Preview folders</button>
+            <button id="grimmory-pause-watching" type="button" class="button secondary" disabled>Pause watching</button>
+          </div>
+          </section>
+          <section id="grimmory-prepare-step" class="grimmory-stage" hidden aria-labelledby="grimmory-prepare-heading">
+          <div class="stage-heading"><h3 id="grimmory-prepare-heading">Review &amp; prepare</h3><button id="grimmory-edit-folders" type="button" class="details-toggle">Edit folders</button></div>
+          <div id="grimmory-plan" class="status-card" hidden></div>
+          <div id="grimmory-prepare-actions" class="grimmory-actions"></div>
+          <p class="notice">Optimizes in place with exact filenames and strict EPUB metadata preservation. The file-only backup includes sidecars and excludes the Grimmory database and application state.</p>
+          </section>
+          <div id="grimmory-maintenance-confirmation" hidden>
+          <label class="filename-option grimmory-maintenance">
+            <input id="grimmory-maintenance" type="checkbox">
+            <span>The library is idle: watching is paused, queued tasks have finished, and other writers are stopped. This also applies before restoring.</span>
+          </label>
+          <details class="grimmory-help"><summary>Why confirm maintenance?</summary><p>Pausing library watching does not stop queued imports, scans, metadata writes, watched Automation, or other external writers. Stop those separately and keep them paused until the operation finishes. Backups cover files only, not the database. Restore replaces files covered by the selected snapshot.</p></details>
+          </div>
+          <div class="grimmory-actions">
+            <button id="grimmory-start" type="button" disabled hidden>Back up &amp; optimize</button>
+            <button id="grimmory-cancel" type="button" class="button secondary" disabled hidden>Cancel safely</button>
+          </div>
+          <section id="grimmory-progress" class="grimmory-stage" aria-live="polite" hidden></section>
+          <div id="grimmory-review-actions" class="grimmory-actions" hidden><button id="grimmory-new-run" type="button" class="button secondary">Choose folders for another run</button></div>
+          <details id="grimmory-past-activity" class="grimmory-past">
+          <summary>Past activity &amp; backups <span id="grimmory-activity-count" class="notice"></span></summary>
+          <h3>Runs</h3>
+          <div id="grimmory-history" class="results-list"></div>
+          <h3>Backups</h3>
+          <p class="notice">Restore replaces files covered by the selected snapshot. Review its folder scope and pause all writers first.</p>
+          <div id="grimmory-snapshots" class="results-list">
+            <div class="field-row">
+              <label for="grimmory-snapshot-select">Snapshot</label>
+              <select id="grimmory-snapshot-select" aria-describedby="grimmory-snapshot-empty" disabled><option value="">Choose a snapshot</option></select>
+            </div>
+            <p id="grimmory-snapshot-empty" class="notice">No backups yet.</p>
+            <div id="grimmory-snapshot-details" class="grimmory-snapshot-details" aria-live="polite"></div>
+            <button id="grimmory-restore" type="button" disabled>Restore snapshot</button>
+          </div>
+          </details>
+          <footer class="grimmory-footer"><details class="grimmory-help"><summary>How it works</summary><p>Choose folders, pause writers, preview the scope, then explicitly start. Every selected file is backed up and verified before EPUBs are replaced. Watching stays paused after completion or restart until you explicitly resume.</p></details><button id="grimmory-refresh" type="button" class="details-toggle">Refresh status</button></footer>
+        </section>
+      </div>
 
       <div class="tab-panel tab-panel-active" data-tab-panel="optimizer">
         <section class="workspace optimizer-workspace">
