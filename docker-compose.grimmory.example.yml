@@ -1,0 +1,11 @@
+# Optional overlay; replace both host paths before using this file.
+# The library and backup directories must be separate. Mount only libraries
+# intended for manual maintenance, never the Docker socket or database files.
+services:
+  epub-optimizer:
+    environment:
+      EPUB_OPTIMIZER_LIBRARY_ROOTS: /libraries
+      EPUB_OPTIMIZER_LIBRARY_BACKUP_DIR: /library-backups
+    volumes:
+      - /path/to/grimmory-books:/libraries
+      - /path/to/optimizer-library-backups:/library-backups

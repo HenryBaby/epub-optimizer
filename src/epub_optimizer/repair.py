@@ -18,6 +18,8 @@ def repair_workspace(
     package_path: str,
     package_tree: etree._ElementTree,
     findings: list[EpubCheckFinding],
+    *,
+    preserve_metadata: bool = False,
 ) -> list[str]:
     """Apply only deterministic, loss-minimizing EPUB repairs in-place."""
     codes = {finding.code.upper() for finding in findings}
@@ -31,7 +33,9 @@ def repair_workspace(
         if finding.path and _normalized_package_path(unquote(finding.path))
         == _normalized_package_path(package_path)
     ]
-    repair_metadata = _repair_opf_metadata(package_tree, metadata_findings)
+    repair_metadata = (
+        [] if preserve_metadata else _repair_opf_metadata(package_tree, metadata_findings)
+    )
     affected_paths = {
         _normalized_package_path(unquote(finding.path))
         for finding in findings
@@ -51,7 +55,7 @@ def repair_workspace(
         for finding in findings
         if finding.code.upper() == "NCX-001" and finding.path
     }
-    if ("OPF-030" in codes and repair_metadata) or ncx_paths:
+    if not preserve_metadata and (("OPF-030" in codes and repair_metadata) or ncx_paths):
         actions.extend(
             _synchronize_ncx_uid(
                 work_dir,

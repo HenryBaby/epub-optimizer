@@ -24,6 +24,71 @@ conservative cleanup rather than aggressive rewriting.
 It does not remove DRM, rewrite book text, strip metadata, recompress images,
 fetch remote resources, upload books anywhere, or overwrite the original EPUB.
 
+The separate Grimmory maintenance workflow can explicitly replace library EPUBs
+in place after a verified library-folder backup. It uses a strict metadata
+preservation policy; the usual upload and watched-folder workflows retain their
+existing behavior.
+
+## Grimmory library maintenance
+
+The Grimmory tab is for manually rerunning selected libraries after optimizer
+improvements. It never starts a library job automatically or resumes one after
+an application restart. No Docker socket or access to Grimmory's containers is
+required.
+
+The optimizer container needs explicit mounts for the selected libraries and a
+separate backup directory. See
+[docker-compose.grimmory.example.yml](docker-compose.grimmory.example.yml) for
+an optional overlay; replace its host paths before using it. Set
+`EPUB_OPTIMIZER_LIBRARY_ROOTS` to the allowed container directories (separated by
+`:` on Linux) and `EPUB_OPTIMIZER_LIBRARY_BACKUP_DIR` to the backup directory.
+Without allowed roots, library maintenance is disabled. These are optimizer
+container paths, not paths discovered by inspecting other containers.
+
+1. Pause Grimmory library watchers and any other processes that can write to the
+   selected folders. Keep them paused through backup, optimization, or restore.
+2. Connect using the Grimmory server URL and a local account with access to the
+   libraries. Credentials/tokens are not saved to the browser or persisted by
+   the optimizer; reconnect after a restart or expired login.
+3. Map each selected Grimmory library path to its mounted path in the optimizer
+   container, then preview the scope and space requirements.
+4. Confirm the maintenance window and explicitly start the job. Every selected
+   file, including sidecars and non-EPUB formats, is copied to an independent,
+   verified library-folder backup before any book is replaced.
+5. Review per-book results. EPUBs keep their exact names and relative paths;
+   unsuccessful books retain their original bytes. Cancellation takes effect
+   between operations. Backups are retained until you manage them explicitly.
+
+The library mode preserves the EPUB's bibliographic metadata and identifiers,
+including existing optimizer markers. Metadata repairs are disabled and the
+finished archive is checked for protected metadata changes before publication.
+CSS, fonts, content presentation, and navigation may still be normalized, so
+file bytes and hashes change. Official EPUBCheck must be available before a
+library original can be replaced; pre-existing validation issues may remain
+reported as `legacy_issues`.
+
+Restore is an explicit action on a retained library-folder backup. Snapshot
+integrity and live-file conflicts are checked before restoration. External
+edits, additions, or missing files require resolution rather than silently
+overwriting unrelated changes.
+Interrupted jobs are reported instead of resuming automatically. Restore can
+reconcile verified temporary files recorded by a job; incomplete or externally
+changed temporary files remain untouched and require manual inspection.
+
+**Backup scope:** library folders only. Grimmory's database and application data
+(including catalog state, shelves, and reading progress) are not backed up or
+restored by this feature. Preserve those with your normal Grimmory backup
+procedure. A verified folder copy is not an atomic filesystem or database
+snapshot and requires the maintenance window above for consistency. The
+optimizer does not modify Grimmory's catalog through its API, but a later scan
+can observe the changed EPUBs.
+
+The upstream API is unstable; the connection uses the documented login and
+library-discovery endpoints. See the
+[implementation contract](docs/grimmory-library-workflow.md) for the preservation
+and recovery boundaries. Development tests use temporary libraries and mocked
+Grimmory responses, never a live library.
+
 ## Run
 
 ```bash
