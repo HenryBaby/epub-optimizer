@@ -13,6 +13,8 @@
 
 - Preserve multiparagraph opening epigraphs, remove stale classes, and maintain
   narrative flow.
+- Allow an explicit public browser origin for Grimmory actions behind a reverse
+  proxy, with normalized hostnames and default ports.
 
 ## 1.2.8 - 2026-10-29
 

@@ -45,6 +45,26 @@ an optional overlay; replace its host paths before using it. Set
 Without allowed roots, library maintenance is disabled. These are optimizer
 container paths, not paths discovered by inspecting other containers.
 
+When the optimizer is behind a reverse proxy that terminates HTTPS, set its
+public browser origin in the optimizer container environment, for example:
+
+```yaml
+environment:
+  EPUB_OPTIMIZER_PUBLIC_ORIGIN: https://epubo.example.org
+```
+
+Recreate the optimizer container after changing its environment. This is the
+URL you open for **EPUB Optimizer**, not the Grimmory server URL entered in the
+connection form or an internal API/container address. Use a single `http://` or
+`https://` origin with its port if nonstandard, without credentials, a path,
+query, or fragment (a trailing `/` is accepted). Once configured, only this
+origin is accepted for browser Grimmory actions, including when the proxy
+connects to the optimizer over HTTP. An invalid setting blocks Grimmory actions
+until corrected. Without this setting, browser actions must match the request's
+own origin. Forwarding headers do not configure the allowed origin. If you see
+“Same-origin requests are required,” check this setting against the optimizer
+URL in your browser and have the proxy operator configure it accordingly.
+
 1. Pause Grimmory library watchers and any other processes that can write to the
    selected folders. Keep them paused through backup, optimization, or restore.
 2. Connect using the Grimmory server URL and a local account with access to the

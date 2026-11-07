@@ -10,7 +10,8 @@ from epub_optimizer.web import app
 
 
 @pytest.fixture
-def grimmory():
+def grimmory(monkeypatch):
+    monkeypatch.delenv("EPUB_OPTIMIZER_PUBLIC_ORIGIN", raising=False)
     status = {
         "connected": False,
         "libraries": [],
@@ -54,6 +55,166 @@ def test_invalid_grimmory_json_is_rejected(grimmory, body):
     response = client.post("/grimmory/start", content=body)
     assert response.status_code == 400
     manager.start.assert_not_awaited()
+
+
+@pytest.mark.parametrize("action", ["connect", "preview", "start", "restore", "cancel"])
+@pytest.mark.parametrize("origin", ["https://optimizer.example", "HTTPS://OPTIMIZER.EXAMPLE:443/"])
+def test_public_origin_allows_https_proxy_actions(grimmory, monkeypatch, action, origin):
+    client, manager = grimmory
+    monkeypatch.setenv("EPUB_OPTIMIZER_PUBLIC_ORIGIN", "https://optimizer.example/")
+    payload = {"password": "secret"}
+    response = client.post(f"/grimmory/{action}", json=payload, headers={"Origin": origin})
+    assert response.status_code == 200
+    operation = getattr(manager, action)
+    if action == "cancel":
+        operation.assert_awaited_once_with()
+    else:
+        operation.assert_awaited_once_with(payload)
+    assert "secret" not in response.text
+
+
+@pytest.mark.parametrize("action", ["connect", "preview", "start", "restore", "cancel"])
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "https://evil.example",
+        "null",
+        "http://testserver",
+        "http://optimizer.example",
+        "https://optimizer.example:444",
+        "https://optimizer.example:invalid",
+        "https://optimizer.example:65536",
+        "https://optimizer.example:",
+        "https://user:secret@optimizer.example",
+        "https://optimizer.example/path",
+        "https://optimizer.example?",
+        "https://optimizer.example#",
+        "https://optimizer.example https://evil.example",
+        "https://optimizer.example,https://evil.example",
+        " https://optimizer.example",
+        "https://optimizer.exa\tmple",
+        "https://optimizer.example\x00",
+        "ftp://optimizer.example",
+        "https://[",
+        "https://[::1]evil",
+    ],
+)
+def test_public_origin_rejects_untrusted_actions(grimmory, monkeypatch, action, origin):
+    client, manager = grimmory
+    monkeypatch.setenv("EPUB_OPTIMIZER_PUBLIC_ORIGIN", "https://optimizer.example")
+    response = client.post(
+        f"/grimmory/{action}", json={"password": "secret"}, headers={"Origin": origin}
+    )
+    assert response.status_code == 403
+    assert "secret" not in response.text
+    getattr(manager, action).assert_not_awaited()
+
+
+@pytest.mark.parametrize("configured", [False, True])
+@pytest.mark.parametrize("action", ["connect", "preview", "start", "restore", "cancel"])
+def test_forwarding_headers_cannot_authorize_an_origin(grimmory, monkeypatch, configured, action):
+    client, manager = grimmory
+    if configured:
+        monkeypatch.setenv("EPUB_OPTIMIZER_PUBLIC_ORIGIN", "https://optimizer.example")
+    response = client.post(
+        f"/grimmory/{action}",
+        json={},
+        headers={
+            "Origin": "https://evil.example",
+            "Forwarded": "proto=https;host=evil.example",
+            "X-Forwarded-Host": "evil.example",
+            "X-Forwarded-Proto": "https",
+        },
+    )
+    assert response.status_code == 403
+    getattr(manager, action).assert_not_awaited()
+
+
+@pytest.mark.parametrize("action", ["connect", "preview", "start", "restore", "cancel"])
+def test_duplicate_origin_headers_rejected(grimmory, action):
+    client, manager = grimmory
+    response = client.post(
+        f"/grimmory/{action}",
+        json={},
+        headers=[
+            ("Origin", "http://testserver"),
+            ("Origin", "http://testserver"),
+        ],
+    )
+    assert response.status_code == 403
+    getattr(manager, action).assert_not_awaited()
+
+
+@pytest.mark.parametrize("origin", ["HTTP://TESTSERVER:80", "http://testserver/"])
+def test_direct_origin_normalizes_case_and_default_port(grimmory, origin):
+    client, manager = grimmory
+    assert client.post("/grimmory/preview", json={}, headers={"Origin": origin}).status_code == 200
+    manager.preview.assert_awaited_once_with({})
+
+
+@pytest.mark.parametrize("port", ["", ":443"])
+def test_direct_https_origin_normalizes_default_port(grimmory, port):
+    _, manager = grimmory
+    client = TestClient(app, base_url="https://testserver:443")
+    response = client.post(
+        "/grimmory/preview", json={}, headers={"Origin": f"HTTPS://TESTSERVER{port}"}
+    )
+    assert response.status_code == 200
+    manager.preview.assert_awaited_once_with({})
+
+
+def test_direct_origin_supports_application_root_path(grimmory):
+    _, manager = grimmory
+    client = TestClient(app, root_path="/epub")
+    response = client.post("/grimmory/preview", json={}, headers={"Origin": "http://testserver"})
+    assert response.status_code == 200
+    manager.preview.assert_awaited_once_with({})
+
+
+@pytest.mark.parametrize("action", ["connect", "preview", "start", "restore", "cancel"])
+@pytest.mark.parametrize("origin", [None, "https://optimizer.example"])
+@pytest.mark.parametrize(
+    "configured",
+    [
+        "",
+        " ",
+        "null",
+        "*",
+        "https://optimizer.example/path",
+        "https://user:secret@optimizer.example",
+        "https://optimizer.example:bad",
+        "https://optimizer.example:65536",
+        "ftp://optimizer.example",
+        "https://optimizer.example https://evil.example",
+        "https://optimizer.exa\nmple",
+        "https://optimizer.example?",
+        "https://optimizer.example#",
+        "https://[::1]evil",
+    ],
+)
+def test_invalid_public_origin_fails_closed(grimmory, monkeypatch, action, origin, configured):
+    client, manager = grimmory
+    monkeypatch.setenv("EPUB_OPTIMIZER_PUBLIC_ORIGIN", configured)
+    response = client.post(
+        f"/grimmory/{action}",
+        json={"password": "secret"},
+        headers={} if origin is None else {"Origin": origin},
+    )
+    assert response.status_code == 503
+    assert "EPUB_OPTIMIZER_PUBLIC_ORIGIN" in response.text
+    assert "secret" not in response.text
+    getattr(manager, action).assert_not_awaited()
+
+
+@pytest.mark.parametrize("action", ["connect", "preview", "start", "restore", "cancel"])
+def test_valid_public_origin_preserves_origin_absent_api_calls(grimmory, monkeypatch, action):
+    client, manager = grimmory
+    monkeypatch.setenv("EPUB_OPTIMIZER_PUBLIC_ORIGIN", "https://optimizer.example")
+    assert client.post(f"/grimmory/{action}", json={}).status_code == 200
+    if action == "cancel":
+        getattr(manager, action).assert_awaited_once_with()
+    else:
+        getattr(manager, action).assert_awaited_once_with({})
 
 
 @pytest.mark.parametrize("action", ["connect", "preview", "start", "restore", "cancel"])

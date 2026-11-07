@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import shutil
 import tempfile
 import uuid
@@ -91,22 +92,70 @@ def grimmory_status() -> JSONResponse:
     return JSONResponse(_grimmory_manager().status(), headers={"Cache-Control": "no-store"})
 
 
+def _normalized_origin(value: str) -> tuple[str, str, int]:
+    # urlsplit strips some controls, so reject them before parsing untrusted input.
+    if not value or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in value):
+        raise ValueError("Invalid origin")
+    parsed = urlsplit(value)
+    if (
+        parsed.scheme not in ("http", "https")
+        or not parsed.hostname
+        or not re.fullmatch(r"[a-z0-9.:-]+", parsed.hostname)
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.netloc.endswith(":")
+        or parsed.path not in ("", "/")
+        or "?" in value
+        or "#" in value
+    ):
+        raise ValueError("Invalid origin")
+    host = parsed.hostname
+    authority = f"[{host}]" if ":" in host else host
+    if not re.fullmatch(re.escape(authority) + r"(?::[0-9]+)?", parsed.netloc.lower()):
+        raise ValueError("Invalid origin")
+    port = parsed.port  # Also rejects malformed and out-of-range ports.
+    return (
+        parsed.scheme,
+        host,
+        port if port is not None else (443 if parsed.scheme == "https" else 80),
+    )
+
+
 async def _grimmory_action(request: Request, action: str) -> JSONResponse:
-    origin = request.headers.get("origin")
-    if origin is not None:
+    public_origin = os.getenv("EPUB_OPTIMIZER_PUBLIC_ORIGIN")
+    expected = None
+    if public_origin is not None:
         try:
-            parsed = urlsplit(origin)
+            expected = _normalized_origin(public_origin)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=503, detail="Invalid EPUB_OPTIMIZER_PUBLIC_ORIGIN configuration."
+            ) from exc
+    origins = request.headers.getlist("origin")
+    if origins:
+        try:
+            if len(origins) != 1:
+                raise ValueError("Multiple origins")
+            origin = _normalized_origin(origins[0])
         except ValueError as exc:
             raise HTTPException(status_code=403, detail="Invalid request origin.") from exc
-        expected = urlsplit(str(request.base_url))
-        if (
-            parsed.scheme != expected.scheme
-            or parsed.netloc != expected.netloc
-            or parsed.path not in ("", "/")
-            or parsed.query
-            or parsed.fragment
-        ):
-            raise HTTPException(status_code=403, detail="Same-origin requests are required.")
+        try:
+            # Never infer the browser origin from client-supplied forwarding headers.
+            # A mounted application's base URL can contain a root path.
+            base = urlsplit(str(request.base_url))
+            if expected is None:
+                expected = _normalized_origin(f"{base.scheme}://{base.netloc}")
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=403,
+                detail="Invalid request origin configuration.",
+            ) from exc
+        if origin != expected:
+            raise HTTPException(
+                status_code=403,
+                detail="Same-origin requests are required. Behind a reverse proxy, configure "
+                "EPUB_OPTIMIZER_PUBLIC_ORIGIN with the optimizer's public browser origin.",
+            )
     try:
         body = await request.body()
         if len(body) > 64 * 1024:

@@ -6,6 +6,9 @@ services:
     environment:
       EPUB_OPTIMIZER_LIBRARY_ROOTS: /libraries
       EPUB_OPTIMIZER_LIBRARY_BACKUP_DIR: /library-backups
+      # For HTTPS reverse proxies, uncomment and set the optimizer's public origin.
+      # Use the browser URL, not the Grimmory server URL; leave unset for direct access.
+      # EPUB_OPTIMIZER_PUBLIC_ORIGIN: https://epubo.example.org
     volumes:
       - /path/to/grimmory-books:/libraries
       - /path/to/optimizer-library-backups:/library-backups
