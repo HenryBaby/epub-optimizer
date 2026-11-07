@@ -1447,8 +1447,8 @@ dd {
 .grimmory-panel .panel-heading p { margin-top: 6px; max-width: 580px; }
 .grimmory-panel h3 { font-size: 16px; }
 .grimmory-panel summary { cursor: pointer; line-height: 1.5; }
-.grimmory-panel input { min-width: 0; max-width: 100%; }
-.grimmory-panel :is(button, input, summary):focus-visible,
+.grimmory-panel :is(input, select) { min-width: 0; max-width: 100%; }
+.grimmory-panel :is(button, input, select, summary):focus-visible,
 .app-tabs button:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
 .grimmory-steps { display: flex; list-style: none; gap: 10px; padding: 0 0 20px; margin: 0; border-bottom: 1px solid var(--border); }
 .grimmory-steps li { display: flex; align-items: center; gap: 7px; flex: 1; color: var(--muted); font-size: 13px; }
@@ -1497,6 +1497,10 @@ dd {
 .grimmory-record[open] > summary { margin-bottom: 8px; }
 .grimmory-record button { justify-self: start; }
 .technical-id { font-family: ui-monospace, monospace; font-size: 12px; }
+.grimmory-panel #grimmory-snapshots { min-width: 0; }
+.grimmory-panel #grimmory-snapshot-select { width: 100%; }
+.grimmory-snapshot-details { display: grid; gap: 12px; overflow-wrap: anywhere; }
+.grimmory-snapshot-details:empty { display: none; }
 .grimmory-footer { display: flex; align-items: start; justify-content: space-between; gap: 20px; }
 .grimmory-footer .grimmory-help { max-width: 640px; }
 .grimmory-footer button { flex-shrink: 0; }

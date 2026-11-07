@@ -145,7 +145,15 @@
           <div id="grimmory-history" class="results-list"></div>
           <h3>Backups</h3>
           <p class="notice">Restore replaces files covered by the selected snapshot. Review its folder scope and pause all writers first.</p>
-          <div id="grimmory-snapshots" class="results-list"></div>
+          <div id="grimmory-snapshots" class="results-list">
+            <div class="field-row">
+              <label for="grimmory-snapshot-select">Snapshot</label>
+              <select id="grimmory-snapshot-select" aria-describedby="grimmory-snapshot-empty" disabled><option value="">Choose a snapshot</option></select>
+            </div>
+            <p id="grimmory-snapshot-empty" class="notice">No backups yet.</p>
+            <div id="grimmory-snapshot-details" class="grimmory-snapshot-details" aria-live="polite"></div>
+            <button id="grimmory-restore" type="button" disabled>Restore snapshot</button>
+          </div>
           </details>
           <footer class="grimmory-footer"><details class="grimmory-help"><summary>How it works</summary><p>Choose folders, pause writers, preview the scope, then explicitly start. Every selected file is backed up and verified before EPUBs are replaced. Watching stays paused after completion or restart until you explicitly resume.</p></details><button id="grimmory-refresh" type="button" class="details-toggle">Refresh status</button></footer>
         </section>

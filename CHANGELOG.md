@@ -4,6 +4,8 @@
 
 ### Changed
 
+- Choose a backup snapshot from a dropdown, review its folder scope, and restore
+  it with one explicit action after confirming maintenance.
 - Bring Grimmory maintenance into one guided workbench with contextual folder,
   preparation, progress, and review steps, plus persistent watching recovery.
 - Put navigation before content and show the upload queue only in Optimizer and

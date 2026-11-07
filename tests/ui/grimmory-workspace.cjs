@@ -93,7 +93,7 @@ function fixture() {
           });
           break;
         case 'restore':
-          assert.deepEqual(payload, { snapshot_id: 'backup-1', maintenance_confirmed: true });
+          assert.deepEqual(payload, { snapshot_id: this.expectedRestoreId || 'backup-1', maintenance_confirmed: true });
           this.state.job = { id: 'restore-1', status: 'restoring', results: [] };
           this.state.active_job = 'restore-1';
           break;
@@ -156,6 +156,11 @@ async function setup(browser, mock, options = {}) {
   await page.goto(origin);
   await page.locator('[data-tab="grimmory"]').click();
   await page.locator('#grimmory-pill').filter({ hasText: /Disconnected|Connected|Maintenance/ }).waitFor();
+  const snapshotLabel = await page.locator('#grimmory-snapshot-select').evaluate(node => ({
+    id: node.id, tag: node.tagName, labels: Array.from(node.labels || [], label => label.textContent.trim()),
+  }));
+  assert.equal(await page.getByLabel('Snapshot', { exact: true }).count(), 1,
+    `Snapshot selection must have an exact accessible label: ${JSON.stringify(snapshotLabel)}`);
   return { context, page, errors, mock };
 }
 
@@ -260,14 +265,18 @@ async function check(name, task) {
       assert.equal(mock.state.watcher_maintenance.status, 'paused');
       assert(!mock.posts.some(item => item.action === 'resume-watching'), 'Completion never automatically resumes watching');
       await page.screenshot({ path: path.join(artifacts, 'desktop-result.png'), fullPage: true });
-      await page.locator('#grimmory-snapshots details').first().locator('summary').click();
-      const restore = page.getByRole('button', { name: 'Restore this library-folder snapshot', exact: true });
+      const snapshots = page.getByLabel('Snapshot', { exact: true });
+      assert.equal(await snapshots.inputValue(), '', 'Backups require an explicit snapshot selection');
+      await snapshots.selectOption('backup-1');
+      await text(page, '#grimmory-snapshot-details', /fiction-draft/);
+      const restore = page.getByRole('button', { name: 'Restore snapshot', exact: true });
       assert(await restore.isDisabled(), 'Restore requires a fresh maintenance acknowledgement');
       await page.locator('#grimmory-maintenance').check();
       let confirmation = '';
       page.once('dialog', async dialog => { confirmation = dialog.message(); await dialog.dismiss(); });
       await restore.click();
       assert.match(confirmation, /backup-1/);
+      assert.match(confirmation, /\/libraries\/fiction-draft/);
       assert.match(confirmation, /replaced|replace/i);
       assert(!mock.posts.some(item => item.action === 'restore'), 'Dismissing confirmation never restores');
       page.once('dialog', dialog => dialog.accept());
@@ -279,6 +288,112 @@ async function check(name, task) {
       await text(page, '#grimmory-watcher-maintenance', /restored/i);
       assert.equal(mock.state.watcher_maintenance.libraries[1].original_watch, false, 'Receipt retains originally disabled watching');
       assert.deepEqual(mock.posts.map(item => item.action), ['connect', 'pause-watching', 'preview', 'start', 'restore', 'cancel', 'resume-watching']);
+      await noOverflow(page);
+      await finish(s);
+    });
+    await check('snapshot dropdown preserves explicit selection, scopes confirmation and clears removed backups', async () => {
+      const mock = fixture();
+      const second = { snapshot_id: 'backup-2', status: 'verified', created_at: snapshot.created_at + 100,
+        plan: { base_url: 'http://grimmory.test:6060', epub_count: 7, files: 9, bytes: 8192,
+          mappings: [{ library_id: 3, remote_path: '/books/essays', local_path: '/libraries/essays' }] } };
+      mock.state.snapshots = [clone(snapshot), clone(second)];
+      const s = await setup(browser, mock);
+      const { page } = s;
+      await page.locator('#grimmory-past-activity > summary').click();
+      const select = page.getByLabel('Snapshot', { exact: true });
+      const restore = page.getByRole('button', { name: 'Restore snapshot', exact: true });
+      assert(await select.isDisabled(), 'Snapshot selection needs a connection');
+      assert(await restore.isDisabled());
+      await connect(page);
+      assert.equal(await select.inputValue(), '');
+      assert.deepEqual(await select.locator('option').evaluateAll(nodes => nodes.map(node => node.value)), ['', 'backup-2', 'backup-1'],
+        'Snapshots are newest first with an explicit placeholder');
+      await select.selectOption('backup-1');
+      await text(page, '#grimmory-snapshot-details', /fiction-draft/);
+      await page.locator('#grimmory-maintenance').check();
+      assert(await restore.isEnabled());
+      await select.selectOption('backup-2');
+      assert.equal(await page.locator('#grimmory-maintenance').isChecked(), false, 'Changing scope resets maintenance acknowledgement');
+      assert(await restore.isDisabled());
+      await text(page, '#grimmory-snapshot-details', /1 folders · 7 EPUBs · 9 files/);
+      await text(page, '#grimmory-snapshot-details', /\/books\/essays → \/libraries\/essays/);
+      assert.equal(await page.locator('#grimmory-snapshots button').count(), 1, 'One restore action for the chosen snapshot');
+      assert.deepEqual(mock.posts.map(item => item.action), ['connect'], 'Choosing snapshots never POSTs');
+      await page.locator('#grimmory-maintenance').check();
+      await select.focus();
+      await page.screenshot({ path: path.join(artifacts, 'desktop-backup-dropdown.png'), fullPage: true });
+      const newer = { ...clone(snapshot), snapshot_id: 'backup-3', created_at: second.created_at + 100 };
+      mock.state.snapshots.push(newer);
+      // Exercise the active-job timer as well as explicit status refreshes.
+      mock.state.job = { id: 'poll-job', status: 'running', message: 'Snapshot poll starts', results: [] };
+      mock.state.active_job = 'poll-job';
+      await page.locator('#grimmory-refresh').click();
+      await text(page, '#grimmory-progress', /Snapshot poll starts/);
+      assert(await select.isDisabled(), 'An active operation locks snapshot selection');
+      assert(await restore.isDisabled(), 'An active operation locks restoration');
+      await restore.dispatchEvent('click');
+      assert.deepEqual(mock.posts.map(item => item.action), ['connect'], 'The click handler guards active operations');
+      assert.equal(await select.inputValue(), 'backup-2', 'A newly added backup does not change the selection');
+      assert(await page.locator('#grimmory-maintenance').isChecked(), 'Status updates preserve acknowledgement for the same scope');
+      const reads = mock.reads;
+      mock.state.job.message = 'Snapshot timer updated';
+      mock.state.snapshots.push({ ...clone(newer), snapshot_id: 'backup-4', created_at: newer.created_at + 100 });
+      await text(page, '#grimmory-progress', /Snapshot timer updated/);
+      assert(mock.reads > reads, 'Snapshot selection survives actual polling');
+      assert.equal(await select.inputValue(), 'backup-2');
+      mock.state.active_job = null;
+      mock.state.job = null;
+      await page.locator('#grimmory-refresh').click();
+      await page.waitForFunction(() => !document.querySelector('#grimmory-snapshot-select').disabled);
+      assert(await restore.isEnabled());
+      mock.state.snapshots = mock.state.snapshots.filter(record => record.snapshot_id !== 'backup-2');
+      await page.locator('#grimmory-refresh').click();
+      await page.waitForFunction(() => document.querySelector('#grimmory-snapshot-select').value === '');
+      assert.equal(await page.locator('#grimmory-snapshot-details').textContent(), '', 'Removed snapshots clear scope details');
+      assert(await restore.isDisabled(), 'Removed selections never fall back to another backup');
+      assert.equal(await page.locator('#grimmory-maintenance').isChecked(), false);
+      mock.state.snapshots = [];
+      await page.locator('#grimmory-refresh').click();
+      await page.locator('#grimmory-snapshot-empty').waitFor({ state: 'visible' });
+      assert(await select.isDisabled(), 'An empty backup list disables selection');
+      assert(await restore.isDisabled());
+      await restore.dispatchEvent('click');
+      assert.deepEqual(mock.posts.map(item => item.action), ['connect'], 'Missing selections cannot restore even through a dispatched click');
+      mock.state.snapshots = [clone(snapshot), clone(second)];
+      await page.locator('#grimmory-refresh').click();
+      await page.waitForFunction(() => !document.querySelector('#grimmory-snapshot-select').disabled);
+      await select.selectOption('backup-2');
+      await page.locator('#grimmory-maintenance').check();
+      mock.state.connected = false;
+      await page.locator('#grimmory-refresh').click();
+      await text(page, '#grimmory-pill', /Disconnected/);
+      assert(await select.isDisabled());
+      assert(await restore.isDisabled());
+      await restore.dispatchEvent('click');
+      assert.deepEqual(mock.posts.map(item => item.action), ['connect'], 'Disconnected state cannot restore through a dispatched click');
+      mock.state.connected = true;
+      mock.state.snapshots[1].plan.base_url = 'http://another-grimmory.test:6060';
+      await page.locator('#grimmory-refresh').click();
+      await text(page, '#grimmory-snapshot-details', /Connect to the Grimmory instance used by this snapshot/);
+      assert(await restore.isDisabled(), 'A snapshot from another instance cannot restore');
+      await restore.dispatchEvent('click');
+      assert.deepEqual(mock.posts.map(item => item.action), ['connect']);
+      mock.state.snapshots[1].plan.base_url = mock.state.base_url;
+      await page.locator('#grimmory-refresh').click();
+      await page.waitForFunction(() => !document.querySelector('#grimmory-restore').disabled);
+      let confirmation = '';
+      page.once('dialog', async dialog => { confirmation = dialog.message(); await dialog.dismiss(); });
+      await restore.click();
+      assert.match(confirmation, /backup-2/);
+      assert.match(confirmation, /1 folders · 7 EPUBs · 9 files/);
+      assert.match(confirmation, /\/books\/essays → \/libraries\/essays/);
+      assert(!confirmation.includes('fiction-draft'), 'Confirmation uses the actual selected scope');
+      assert.deepEqual(mock.posts.map(item => item.action), ['connect'], 'Polling, refreshes, selections and dismissed confirmation never restore');
+      mock.expectedRestoreId = 'backup-2';
+      page.once('dialog', dialog => dialog.accept());
+      await restore.click();
+      await text(page, '#grimmory-progress', /Restoring/);
+      assert.deepEqual(mock.posts.at(-1), { action: 'restore', payload: { snapshot_id: 'backup-2', maintenance_confirmed: true } });
       await noOverflow(page);
       await finish(s);
     });
@@ -340,7 +455,9 @@ async function check(name, task) {
       await finish(s);
     });
     await check('dark mobile connected workspace has labelled keyboard controls and no horizontal overflow', async () => {
-      const s = await setup(browser, fixture(), { viewport: { width: 390, height: 844 }, colorScheme: 'dark' });
+      const mock = fixture();
+      mock.state.snapshots = [clone(snapshot)];
+      const s = await setup(browser, mock, { viewport: { width: 390, height: 844 }, colorScheme: 'dark' });
       await connect(s.page);
       await selectFolders(s.page);
       await noOverflow(s.page);
@@ -349,6 +466,12 @@ async function check(name, task) {
       await mounted.focus();
       await s.page.keyboard.press('Tab');
       assert(await s.page.evaluate(() => document.activeElement !== document.body), 'Tab moves focus to an interactive control');
+      await s.page.locator('#grimmory-past-activity > summary').click();
+      const select = s.page.getByLabel('Snapshot', { exact: true });
+      await select.selectOption('backup-1');
+      await select.focus();
+      assert.match(await select.evaluate(node => getComputedStyle(node).outlineStyle), /solid/, 'Snapshot selection has a visible keyboard focus outline');
+      await noOverflow(s.page);
       await s.page.screenshot({ path: path.join(artifacts, 'mobile-connected-dark.png'), fullPage: true });
       await finish(s);
     });

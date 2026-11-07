@@ -1238,6 +1238,7 @@ function downloadJson(filename, value) {
   let mappingsBaseUrl = null;
   let choosingFolders = false;
   let busyAction = "";
+  let selectedSnapshotId = "";
   const renderSignatures = new Map();
 
   function message(text, error = false) {
@@ -1302,9 +1303,8 @@ function downloadJson(filename, value) {
     find("start").disabled = locked || !plan?.plan_id || !maintenance.checked;
     find("cancel").disabled = busy || !active();
     find("refresh").disabled = busy;
-    find("snapshots").querySelectorAll("button").forEach((node) => {
-      node.disabled = locked || !maintenance.checked;
-    });
+    find("snapshot-select").disabled = locked || !state.connected || !availableSnapshots().length;
+    find("restore").disabled = locked || !state.connected || !maintenance.checked || !restorableSnapshot();
     find("edit-folders").disabled = locked;
     find("new-run").disabled = locked;
     const selected = mappings.filter((row) => row.selected.checked).length;
@@ -1511,29 +1511,72 @@ function downloadJson(filename, value) {
     }
   }
 
-  function renderRecords(target, records, snapshot = false) {
+  function availableSnapshots() {
+    return (state.snapshots || []).filter((record) => record.snapshot_id || record.id);
+  }
+
+  function selectedSnapshot() {
+    return availableSnapshots().find((record) => String(record.snapshot_id || record.id) === selectedSnapshotId);
+  }
+
+  function restorableSnapshot() {
+    const record = selectedSnapshot();
+    return record && (!record.plan?.base_url || record.plan.base_url === state.base_url) ? record : null;
+  }
+
+  function snapshotDate(record) {
+    return record.created_at ? new Date(record.created_at * 1000).toLocaleString() : "Date unavailable";
+  }
+
+  function renderSnapshotDetails() {
+    const target = find("snapshot-details");
+    target.replaceChildren();
+    const record = selectedSnapshot();
+    if (!record) return;
+    target.append(element("p", `${snapshotDate(record)} · Snapshot status: ${record.status || "available"}`));
+    const scope = record.plan || {};
+    target.append(element("p", `${(scope.mappings || []).length} folders · ${scope.epub_count || 0} EPUBs · ${scope.files || 0} files · ${formatBytes(scope.bytes || 0)}`));
+    const folders = element("ul", undefined, "change-report");
+    for (const mapping of scope.mappings || []) {
+      folders.append(element("li", `${mapping.remote_path} → ${mapping.local_path} (optimizer container)`));
+    }
+    target.append(folders);
+    const technical = element("details", undefined, "grimmory-help");
+    technical.append(element("summary", "Snapshot ID"), element("p", record.snapshot_id || record.id, "technical-id"));
+    target.append(technical);
+    if (!restorableSnapshot()) target.append(element("p", "Connect to the Grimmory instance used by this snapshot before restoring.", "notice"));
+  }
+
+  function renderSnapshots() {
+    const select = find("snapshot-select");
+    const records = availableSnapshots().slice().sort((left, right) => (right.created_at || 0) - (left.created_at || 0));
+    if (selectedSnapshotId && !selectedSnapshot()) {
+      selectedSnapshotId = "";
+      maintenance.checked = false;
+    }
+    select.replaceChildren(element("option", "Choose a snapshot"));
+    select.firstElementChild.value = "";
+    for (const record of records) {
+      const scope = record.plan || {};
+      const id = String(record.snapshot_id || record.id);
+      const option = element("option", `${snapshotDate(record)} · ${(scope.mappings || []).length} folders · ${scope.epub_count || 0} EPUBs · ${id.slice(0, 12)}`);
+      option.value = id;
+      select.append(option);
+    }
+    select.value = selectedSnapshotId;
+    find("snapshot-empty").hidden = records.length > 0;
+    renderSnapshotDetails();
+  }
+
+  function renderRecords(target, records) {
     target.replaceChildren();
     for (const record of records || []) {
       const card = element("details", undefined, "grimmory-record");
-      card.dataset.key = `${snapshot ? "snapshot" : "run"}-${record.snapshot_id || record.id || record.job_id}`;
+      card.dataset.key = `run-${record.snapshot_id || record.id || record.job_id}`;
       const date = record.created_at ? new Date(record.created_at * 1000).toLocaleString() : "Date unavailable";
-      card.append(element("summary", `${snapshot ? "Backup" : "Run"} · ${date} · ${record.status || record.phase || "available"}`));
+      card.append(element("summary", `Run · ${date} · ${record.status || record.phase || "available"}`));
       card.append(element("p", `ID: ${record.snapshot_id || record.id || record.job_id || "Unavailable"}`, "technical-id notice"));
-      if (snapshot) {
-        card.append(element("p", `Snapshot status: ${record.status || "available"}`));
-        renderScope(card, record.plan || {});
-      } else renderJob(card, record);
-      if (snapshot && (record.snapshot_id || record.id)) {
-        const restore = element("button", "Restore this library-folder snapshot");
-        restore.type = "button";
-        restore.addEventListener("click", () => {
-          if (!maintenance.checked) return;
-          const scope = record.snapshot_id || record.id;
-          if (!window.confirm(`Restore library-folder snapshot ${scope}? Files covered by this snapshot will be replaced. All writers must remain paused.`)) return;
-          run("restore", { snapshot_id: scope, maintenance_confirmed: true });
-        });
-        card.append(restore);
-      }
+      renderJob(card, record);
       target.append(card);
     }
     if (!target.childElementCount) target.append(element("p", "No records yet.", "notice"));
@@ -1558,7 +1601,7 @@ function downloadJson(filename, value) {
       if (currentJob()) renderJob(progress, currentJob());
     });
     renderChanged("history", state.history || state.jobs || [], (target) => renderRecords(target, state.history || state.jobs));
-    renderChanged("snapshots", state.snapshots || [], (target) => renderRecords(target, state.snapshots, true));
+    renderChanged("snapshots", [state.snapshots || [], state.base_url], renderSnapshots);
     find("activity-count").textContent = `${(state.history || state.jobs || []).length} runs · ${(state.snapshots || []).length} backups`;
     updateControls();
     clearTimeout(pollTimer);
@@ -1661,6 +1704,22 @@ function downloadJson(filename, value) {
   });
   find("cancel").addEventListener("click", () => { if (!busy && active()) run("cancel", {}); });
   find("refresh").addEventListener("click", loadStatus);
+  find("snapshot-select").addEventListener("change", (event) => {
+    selectedSnapshotId = event.target.value;
+    maintenance.checked = false;
+    renderSnapshotDetails();
+    updateControls();
+  });
+  find("restore").addEventListener("click", () => {
+    if (busy || active() || !state.connected || !maintenance.checked) return;
+    const record = restorableSnapshot();
+    if (!record) return;
+    const id = record.snapshot_id || record.id;
+    const scope = record.plan || {};
+    const folders = (scope.mappings || []).map((mapping) => `${mapping.remote_path} → ${mapping.local_path}`).join("\n");
+    if (!window.confirm(`Restore library-folder snapshot ${id} (${snapshotDate(record)})?\n${(scope.mappings || []).length} folders · ${scope.epub_count || 0} EPUBs · ${scope.files || 0} files\n${folders}\nFiles covered by this snapshot will be replaced. All writers must remain paused.`)) return;
+    run("restore", { snapshot_id: id, maintenance_confirmed: true });
+  });
   maintenance.addEventListener("change", updateControls);
   find("past-activity").addEventListener("toggle", updateControls);
   function editFolders() {
