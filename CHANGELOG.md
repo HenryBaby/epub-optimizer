@@ -13,6 +13,8 @@
 
 ### Fixed
 
+- Preserve containers around orphan list items and legacy pagebreak elements on
+  reruns, avoiding newly introduced EPUBCheck phrasing-content errors.
 - Explain Grimmory backup filesystem failures with sanitized operation and errno
   diagnostics, including ownership preservation, permissions, space, and sync.
 - Preserve multiparagraph opening epigraphs, remove stale classes, and maintain

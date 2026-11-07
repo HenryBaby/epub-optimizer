@@ -7,6 +7,7 @@ import pytest
 from lxml import etree
 
 from epub_optimizer.core import (
+    _classify_blocks,
     _normalize_direct_body_content,
     _normalize_inline_spans,
     _publish_output,
@@ -17,7 +18,12 @@ from epub_optimizer.core import (
     preview_epub_changes,
     validate_epub_details,
 )
-from epub_optimizer.epubcheck import EpubCheckFinding, EpubCheckResult
+from epub_optimizer.epubcheck import (
+    EpubCheckFinding,
+    EpubCheckResult,
+    EpubCheckRunner,
+    compare_epubcheck,
+)
 from epub_optimizer.errors import InvalidEpubError
 
 
@@ -170,6 +176,145 @@ def test_blockquote_italic_span_is_wrapped_in_a_valid_paragraph() -> None:
         '<blockquote xmlns="http://www.w3.org/1999/xhtml" id="filepos3777" '
         'class="calibre11"><p><em>To Kim</em></p><div/></blockquote>'
     )
+
+
+@pytest.mark.parametrize("tag", ["li", "pagebreak"])
+@pytest.mark.parametrize("container_tag", ["body", "blockquote", "div"])
+@pytest.mark.parametrize("document_role", ["chapter", "title"])
+def test_normalization_preserves_legacy_structural_sentinels(
+    tag: str, container_tag: str, document_role: str
+) -> None:
+    fragment = (
+        f'Before <{tag} id="sentinel" title="marker" xml:lang="en">'
+        f'First <em>emphasis</em> item</{tag}> between '
+        f'<{tag} id="second">Second item</{tag}> after'
+    )
+    if container_tag != "body":
+        fragment = f'<{container_tag} id="container">{fragment}</{container_tag}>'
+    root = etree.fromstring(
+        f'<html xmlns="http://www.w3.org/1999/xhtml"><body>{fragment}</body></html>'
+    )
+    sentinels = root.xpath(f"//*[local-name()='{tag}']")
+    original_nodes = [etree.tostring(node, with_tail=False) for node in sentinels]
+    original_text = "".join(root.itertext())
+
+    for _ in range(2):
+        _normalize_direct_body_content(root)
+        _classify_blocks(root, document_role)
+
+        assert "".join(root.itertext()) == original_text
+        assert [etree.tostring(node, with_tail=False) for node in sentinels] == original_nodes
+        assert [etree.QName(node.getparent()).localname for node in sentinels] == [
+            container_tag,
+            container_tag,
+        ]
+        assert root.xpath("//*[@id='sentinel' or @id='second']") == sentinels
+
+
+@pytest.mark.parametrize("version", ["2.0", "3.0"])
+@pytest.mark.parametrize("sentinel", ["li", "pagebreak"])
+def test_optimize_twice_preserves_legacy_structural_sentinels_with_epubcheck(
+    tmp_path: Path, version: str, sentinel: str
+) -> None:
+    source = tmp_path / "legacy.epub"
+    body = "<h1>Chapter One</h1>"
+    for container in ("div", "body", "blockquote"):
+        fragment = (
+            f'Before <{sentinel} id="{container}-first" title="42" xml:lang="en">'
+            f'First <em>emphasis</em> item</{sentinel}> between '
+            f'<{sentinel} id="{container}-second">Second item</{sentinel}> after'
+        )
+        body += fragment if container == "body" else f"<{container}>{fragment}</{container}>"
+    _write_structural_sentinel_epub(source, version, body)
+    checker = EpubCheckRunner()
+    baseline = checker.check(source)
+    assert baseline.available, baseline.message
+    legacy_errors = [
+        finding for finding in baseline.errors
+        if finding.code == "RSC-005" and f'"{sentinel}"' in finding.message
+    ]
+    assert legacy_errors, baseline.findings
+    with zipfile.ZipFile(source) as archive:
+        original = etree.fromstring(archive.read("chapter.xhtml"))
+    original_nodes = [
+        (node.tag, dict(node.attrib), "".join(node.itertext()))
+        for node in original.xpath(f"//*[local-name()='{sentinel}']")
+    ]
+    original_body = original.xpath("//*[local-name()='body']")[0]
+    original_text = " ".join("".join(original_body.itertext()).split())
+
+    for pass_number in (1, 2):
+        result = optimize_epub(
+            source, tmp_path / f"pass-{pass_number}", preserve_metadata=True, epubcheck=checker
+        )
+        checked = checker.check(result.output_path)
+        assert checked.available, checked.message
+        comparison = compare_epubcheck(baseline, checked)
+        assert comparison.introduced == [], comparison.introduced
+        assert result.epubcheck is not None
+        assert result.epubcheck.introduced == []
+        # Wrapping direct text can resolve source diagnostics. The retained legacy
+        # elements must still be reported, without requiring every original error.
+        assert any(
+            finding.code == "RSC-005" and f'"{sentinel}"' in finding.message
+            for finding in checked.errors
+        ), checked.findings
+        with zipfile.ZipFile(result.output_path) as archive:
+            root = etree.fromstring(archive.read("chapter.xhtml"))
+        nodes = root.xpath(f"//*[local-name()='{sentinel}']")
+        assert [(node.tag, dict(node.attrib), "".join(node.itertext())) for node in nodes] == (
+            original_nodes
+        )
+        assert [etree.QName(node.getparent()).localname for node in nodes] == [
+            "div", "div", "body", "body", "blockquote", "blockquote"
+        ]
+        assert " ".join("".join(root.xpath("//*[local-name()='body']")[0].itertext()).split()) == (
+            original_text
+        )
+        source = result.output_path
+        baseline = checked
+
+
+@pytest.mark.parametrize("version", ["2.0", "3.0"])
+def test_optimize_twice_keeps_valid_lists_and_pagebreak_spans_with_epubcheck(
+    tmp_path: Path, version: str
+) -> None:
+    source = tmp_path / "valid.epub"
+    pagebreak = (
+        '<p>Before <span epub:type="pagebreak" id="page-42" title="42"/> after</p>'
+        if version == "3.0" else ""
+    )
+    _write_structural_sentinel_epub(
+        source, version,
+        '<h1>Chapter One</h1><ul id="unordered"><li id="first">First <em>item</em></li>'
+        '<li id="second">Second item</li></ul><ol id="ordered"><li>Third item</li></ol>'
+        + pagebreak,
+    )
+    checker = EpubCheckRunner()
+    baseline = checker.check(source)
+    assert baseline.available, baseline.message
+    assert baseline.errors == []
+
+    for pass_number in (1, 2):
+        result = optimize_epub(
+            source, tmp_path / f"pass-{pass_number}", preserve_metadata=True, epubcheck=checker
+        )
+        assert result.epubcheck is not None
+        assert result.epubcheck.introduced == []
+        assert result.epubcheck.output.errors == []
+        with zipfile.ZipFile(result.output_path) as archive:
+            root = etree.fromstring(archive.read("chapter.xhtml"))
+        assert [etree.QName(node.getparent()).localname for node in root.xpath(
+            "//*[local-name()='li']"
+        )] == ["ul", "ul", "ol"]
+        assert root.xpath("//*[@id='first']/*[local-name()='em']/text()") == ["item"]
+        if version == "3.0":
+            marker = root.xpath("//*[@id='page-42']")[0]
+            assert marker.tag == "{http://www.w3.org/1999/xhtml}span"
+            assert marker.get("{http://www.idpf.org/2007/ops}type") == "pagebreak"
+            assert marker.get("title") == "42"
+            assert etree.QName(marker.getparent()).localname == "p"
+        source = result.output_path
 
 
 def test_optimize_records_unavailable_epubcheck(tmp_path: Path) -> None:
@@ -1014,6 +1159,61 @@ def test_encryption_cleanup_preserves_unrelated_records(tmp_path: Path) -> None:
     assert "OEBPS/Images/cover.jpg" in remaining
     assert "https://example.com/OEBPS/Fonts/font.otf" in remaining
     assert "other:EncryptedData" in remaining
+
+
+def _write_structural_sentinel_epub(path: Path, version: str, body: str) -> None:
+    """Build complete EPUB 2/3 packages so only the supplied body is malformed."""
+    epub3 = version == "3.0"
+    modified = '<meta property="dcterms:modified">2026-11-07T00:00:00Z</meta>' if epub3 else ""
+    navigation_item = (
+        '<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>'
+        if epub3 else
+        '<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>'
+    )
+    spine_attribute = "" if epub3 else ' toc="ncx"'
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("mimetype", "application/epub+zip", compress_type=zipfile.ZIP_STORED)
+        archive.writestr(
+            "META-INF/container.xml",
+            '<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0">'
+            '<rootfiles><rootfile full-path="content.opf" '
+            'media-type="application/oebps-package+xml"/></rootfiles></container>',
+        )
+        archive.writestr(
+            "content.opf",
+            f'<package xmlns="http://www.idpf.org/2007/opf" version="{version}" '
+            'unique-identifier="book-id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/">'
+            '<dc:identifier id="book-id">urn:test:structural-sentinels</dc:identifier>'
+            '<dc:title>Structural Sentinels</dc:title><dc:language>en</dc:language>'
+            f'{modified}</metadata><manifest>{navigation_item}'
+            '<item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml"/>'
+            f'</manifest><spine{spine_attribute}><itemref idref="chapter"/></spine></package>',
+        )
+        archive.writestr(
+            "chapter.xhtml",
+            '<html xmlns="http://www.w3.org/1999/xhtml" '
+            'xmlns:epub="http://www.idpf.org/2007/ops">'
+            f'<head><title>Chapter One</title></head><body>{body}</body></html>',
+        )
+        if epub3:
+            archive.writestr(
+                "nav.xhtml",
+                '<html xmlns="http://www.w3.org/1999/xhtml" '
+                'xmlns:epub="http://www.idpf.org/2007/ops"><head><title>Contents</title></head>'
+                '<body><nav epub:type="toc"><h1>Contents</h1><ol><li>'
+                '<a href="chapter.xhtml">Chapter One</a></li></ol></nav></body></html>',
+            )
+        else:
+            archive.writestr(
+                "toc.ncx",
+                '<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">'
+                '<head><meta name="dtb:uid" content="urn:test:structural-sentinels"/>'
+                '<meta name="dtb:depth" content="1"/><meta name="dtb:totalPageCount" content="0"/>'
+                '<meta name="dtb:maxPageNumber" content="0"/></head>'
+                '<docTitle><text>Structural Sentinels</text></docTitle><navMap>'
+                '<navPoint id="chapter" playOrder="1"><navLabel><text>Chapter One</text></navLabel>'
+                '<content src="chapter.xhtml"/></navPoint></navMap></ncx>',
+            )
 
 
 def _write_minimal_epub(

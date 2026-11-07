@@ -2015,9 +2015,10 @@ def _normalize_inline_spans(root: etree._Element) -> None:
             span.attrib.pop("class", None)
 
 
-# Non-phrasing flow elements from both XHTML 1.1 and EPUB 3's HTML vocabulary.
-# Keep this shared with block-child detection so a containing div cannot later
-# be mistaken for a paragraph or heading.
+# Non-phrasing elements, including source-only structural sentinels such as
+# orphan li and legacy pagebreak. These are not all valid flow vocabulary:
+# preserve their containers rather than compound source defects with a generated
+# paragraph or heading. Keep body normalization and block-child detection shared.
 _BLOCK_FLOW_ELEMENTS = {
     "address",
     "article",
@@ -2042,11 +2043,13 @@ _BLOCK_FLOW_ELEMENTS = {
     "header",
     "hgroup",
     "hr",
+    "li",
     "main",
     "menu",
     "nav",
     "ol",
     "p",
+    "pagebreak",
     "pre",
     "search",
     "section",
