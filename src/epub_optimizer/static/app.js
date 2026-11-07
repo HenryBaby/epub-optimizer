@@ -1233,6 +1233,7 @@ function downloadJson(filename, value) {
   let busy = false;
   let pollTimer = null;
   let mappings = [];
+  let mappingsBaseUrl = null;
 
   function currentJob() {
     if (state.active_job && typeof state.active_job === "object") return state.active_job;
@@ -1258,6 +1259,14 @@ function downloadJson(filename, value) {
     mappingList.querySelectorAll("input").forEach((node) => { node.disabled = locked; });
     maintenance.disabled = locked;
     find("preview").disabled = locked || !state.connected || !mappings.some((row) => row.selected.checked);
+    const receipt = state.watcher_maintenance;
+    const pendingReceipt = receipt && receipt.status !== "resumed";
+    const selectedIds = selectedLibraryIds();
+    const sameSelection = pendingReceipt && receipt.base_url === state.base_url &&
+      receipt.libraries.length === selectedIds.length && receipt.libraries.every((library) => selectedIds.includes(library.library_id));
+    find("pause-watching").disabled = locked || !state.connected || !selectedIds.length ||
+      (pendingReceipt && (!sameSelection || receipt.libraries.some((library) => ["resume_pending", "restored"].includes(library.status))));
+    find("resume-watching").disabled = locked || !state.connected || !pendingReceipt || receipt.base_url !== state.base_url;
     find("start").disabled = locked || !plan?.plan_id || !maintenance.checked;
     find("cancel").disabled = busy || !active();
     find("refresh").disabled = busy;
@@ -1273,6 +1282,11 @@ function downloadJson(filename, value) {
   }
 
   function renderMappings() {
+    const drafts = mappingsBaseUrl === state.base_url ? mappings.map((row) => ({
+      library_id: row.library_id, remote_path: row.remote_path,
+      checked: row.selected.checked, local_path: row.local.value,
+    })) : [];
+    mappingsBaseUrl = state.base_url;
     mappingList.replaceChildren();
     mappings = [];
     for (const library of state.libraries || []) {
@@ -1288,9 +1302,14 @@ function downloadJson(filename, value) {
         local.type = "text";
         local.placeholder = "/libraries/books";
         local.autocomplete = "off";
+        const draft = drafts.find((mapping) =>
+          mapping.library_id === library.id && mapping.remote_path === remotePath);
         const saved = (state.mappings || []).find((mapping) =>
           mapping.library_id === library.id && mapping.remote_path === remotePath);
-        if (saved) {
+        if (draft) {
+          selected.checked = draft.checked;
+          local.value = draft.local_path;
+        } else if (saved) {
           selected.checked = true;
           local.value = saved.local_path;
         }
@@ -1303,6 +1322,39 @@ function downloadJson(filename, value) {
       }
     }
     if (!mappings.length) mappingList.append(element("p", "No library folders discovered. Connect to Grimmory to continue.", "notice"));
+  }
+
+  function selectedLibraryIds() {
+    return [...new Set(mappings.filter((row) => row.selected.checked).map((row) => row.library_id))];
+  }
+
+  function renderWatcherMaintenance() {
+    const target = find("watcher-maintenance");
+    target.replaceChildren(element("h3", "Selected library watching"));
+    const receipt = state.watcher_maintenance;
+    if (!receipt) {
+      target.append(element("p", "No saved watching session. Select library folders, then explicitly pause watching; a local mount or preview is not required."));
+      return;
+    }
+    target.append(element("p", `Watching session: ${receipt.status} · ${receipt.base_url}`));
+    const list = element("ul");
+    for (const library of receipt.libraries || []) {
+      const labels = {
+        paused: "Watching paused", already_disabled: "Watching was already disabled",
+        failed: "Watching update failed", unmodified: "Watching was already disabled",
+        pause_pending: "Pause not yet verified", resume_pending: "Resume not yet verified", resumed: "Previous watching state restored",
+        restored: "Previous watching state restored", pending: "Awaiting watching update",
+      };
+      list.append(element("li", `${library.name || `Library ${library.library_id}`} — ${labels[library.status] || library.status}${library.error ? `: ${library.error}` : ""}`));
+    }
+    target.append(list);
+    if (receipt.status !== "resumed") {
+      target.append(element("p", "Review partial failures before continuing. Watching remains paused after job completion and application restarts until you explicitly resume. Originally disabled watching stays disabled."));
+      if (!state.connected || receipt.base_url !== state.base_url) {
+        target.append(element("p", "Reconnect to this same Grimmory instance to resume the saved previous watching states."));
+      }
+    }
+    target.append(element("p", "Queued imports, scans, metadata writes, and other external writers must be handled separately before confirming maintenance."));
   }
 
   function renderPlan() {
@@ -1382,6 +1434,7 @@ function downloadJson(filename, value) {
     state = next;
     find("pill").textContent = active() ? "Maintenance active" : (state.connected ? "Connected" : "Disconnected");
     if (refreshMappings) renderMappings();
+    renderWatcherMaintenance();
     const progress = find("progress");
     progress.replaceChildren(element("h3", "Current operation"));
     if (currentJob()) renderJob(progress, currentJob());
@@ -1425,13 +1478,14 @@ function downloadJson(filename, value) {
       if (action === "preview") {
         plan = result;
         renderPlan();
-      } else if (action === "connect") {
+      } else if (["connect", "pause-watching", "resume-watching"].includes(action)) {
         invalidatePlan();
+        maintenance.checked = false;
       } else if (action === "start" || action === "restore") {
         invalidatePlan();
         maintenance.checked = false;
       }
-      if (action === "connect") render(result, true);
+      if (["connect", "pause-watching", "resume-watching"].includes(action)) render(result, true);
       else render(await request(""));
       find("message").textContent = action === "preview" ? "Preview ready. Confirm maintenance before starting." : "Request accepted.";
     } catch (error) {
@@ -1459,6 +1513,20 @@ function downloadJson(filename, value) {
       remote_path: row.remote_path,
       local_path: row.local.value,
     })) });
+  });
+  find("pause-watching").addEventListener("click", () => {
+    const libraryIds = selectedLibraryIds();
+    if (busy || active() || !state.connected || !libraryIds.length) return;
+    invalidatePlan();
+    maintenance.checked = false;
+    run("pause-watching", { library_ids: libraryIds });
+  });
+  find("resume-watching").addEventListener("click", () => {
+    const receipt = state.watcher_maintenance;
+    if (busy || active() || !state.connected || !receipt?.session_id || receipt.base_url !== state.base_url) return;
+    invalidatePlan();
+    maintenance.checked = false;
+    run("resume-watching", { session_id: receipt.session_id });
   });
   find("start").addEventListener("click", () => {
     if (plan?.plan_id && maintenance.checked) run("start", { plan_id: plan.plan_id, maintenance_confirmed: true });

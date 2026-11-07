@@ -107,13 +107,19 @@
           <p class="notice">Select remote library paths and map each to its mounted folder inside this optimizer container. Configure mounts in your deployment before continuing.</p>
           <div id="grimmory-mappings" class="results-list"><p class="notice">Connect to discover library folders. Nothing runs automatically.</p></div>
           <div class="grimmory-actions">
+            <button id="grimmory-pause-watching" type="button" disabled>Pause watching selected libraries</button>
+            <button id="grimmory-resume-watching" type="button" class="button secondary" disabled>Resume previous watching states</button>
+          </div>
+          <p class="notice">Selecting any folder pauses watching for every folder in that library. Watching controls require an account with admin or manage-library permission. They only change selected libraries’ watching settings. Queued imports, scans, metadata writes, and other external writers are not stopped. Pause EPUB Optimizer watched Automation separately if it feeds Bookdrop. Watching stays paused after a restart or job completion until you explicitly resume.</p>
+          <div id="grimmory-watcher-maintenance" class="status-card" role="status" aria-live="polite"></div>
+          <div class="grimmory-actions">
             <button id="grimmory-preview" type="button" disabled>Preview selected folders</button>
             <button id="grimmory-refresh" type="button" class="button secondary">Refresh status</button>
           </div>
           <div id="grimmory-plan" class="status-card" hidden></div>
           <label class="filename-option grimmory-maintenance">
             <input id="grimmory-maintenance" type="checkbox">
-            I have paused other writers and watchers for these folders, and disabled Grimmory library watching. This also applies before restoring a snapshot.
+            I have waited for queued imports, scans, and metadata writes to finish, paused other external writers and watchers (including watched Automation if needed), and disabled Grimmory library watching for these folders. This also applies before restoring a snapshot.
           </label>
           <div class="grimmory-actions">
             <button id="grimmory-start" type="button" disabled>Back up &amp; optimize</button>

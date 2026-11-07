@@ -16,6 +16,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
+from urllib.error import HTTPError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
@@ -136,21 +137,31 @@ class _NoRedirect(HTTPRedirectHandler):
         raise GrimmoryValidationError("Grimmory redirects are not permitted.")
 
 
-def _request_json(url, payload=None, token=None):
+def _request_json(url, payload=None, token=None, *, method=None):
     headers = {"Accept": "application/json"}
     if payload is not None:
         headers["Content-Type"] = "application/json"
     if token:
         headers["Authorization"] = f"Bearer {token}"
     request = Request(
-        url, data=json.dumps(payload).encode() if payload is not None else None, headers=headers
+        url,
+        data=json.dumps(payload).encode() if payload is not None else None,
+        headers=headers,
+        method=method,
     )
     try:
         with build_opener(_NoRedirect).open(request, timeout=15) as response:
             body = response.read(2_000_001)
         if len(body) > 2_000_000:
             raise GrimmoryValidationError("Response too large.")
-        return json.loads(body)
+        return json.loads(body) if body else None
+    except HTTPError as exc:
+        if exc.code == 403:
+            raise GrimmoryValidationError(
+                "Grimmory denied access; use an administrator or a user with library "
+                "management permission and access to the selected library."
+            ) from None
+        raise GrimmoryValidationError("Grimmory request failed; check access and retry.") from None
     except Exception:
         raise GrimmoryValidationError(
             "Grimmory request failed; check the URL and credentials."
@@ -190,7 +201,15 @@ class GrimmoryManager:
                 else ["/watch", "/output", "/failed", "/unprocessed"]
             )
         ]
-        self._state = dict(base_url="", libraries=[], mappings=[], plans={}, snapshots={}, jobs=[])
+        self._state = dict(
+            base_url="",
+            libraries=[],
+            mappings=[],
+            plans={},
+            snapshots={},
+            jobs=[],
+            watcher_maintenance=None,
+        )
         state_path = self.state_dir / "state.json"
         self._state_digest = None
         if state_path.exists():
@@ -351,6 +370,219 @@ class GrimmoryManager:
             for x in libraries
         ]
 
+    @staticmethod
+    def _watch_body(library, library_id):
+        """Whitelist the complete update DTO; never send discovery-only fields."""
+        fields = (
+            "name",
+            "icon",
+            "iconType",
+            "paths",
+            "watch",
+            "formatPriority",
+            "allowedFormats",
+            "metadataSource",
+            "organizationMode",
+        )
+        if not isinstance(library, dict) or str(library.get("id")) != str(library_id):
+            raise GrimmoryValidationError("Unexpected Grimmory library identity.")
+        if any(key not in library for key in ("name", "paths", "watch")):
+            raise GrimmoryValidationError("Incomplete library settings; watching was not changed.")
+        body = {key: copy.deepcopy(library.get(key)) for key in fields}
+        if (
+            not isinstance(body["name"], str)
+            or not body["name"].strip()
+            or type(body["watch"]) is not bool
+        ):
+            raise GrimmoryValidationError("Invalid library settings; watching was not changed.")
+        for key in ("icon", "iconType", "metadataSource", "organizationMode"):
+            if body[key] is not None and not isinstance(body[key], str):
+                raise GrimmoryValidationError("Invalid library settings; watching was not changed.")
+        for key in ("formatPriority", "allowedFormats"):
+            if body[key] is not None and (
+                not isinstance(body[key], list) or any(not isinstance(x, str) for x in body[key])
+            ):
+                raise GrimmoryValidationError("Invalid library formats; watching was not changed.")
+        if not isinstance(body["paths"], list) or not body["paths"]:
+            raise GrimmoryValidationError("Missing library paths; watching was not changed.")
+        paths = []
+        for path in body["paths"]:
+            if (
+                not isinstance(path, dict)
+                or ("id" in path and (type(path["id"]) is not int or path["id"] <= 0))
+                or (
+                    "libraryId" in path
+                    and (
+                        type(path["libraryId"]) is not int
+                        or str(path["libraryId"]) != str(library_id)
+                    )
+                )
+                or not isinstance(path.get("path"), str)
+                or not path["path"].strip()
+            ):
+                raise GrimmoryValidationError(
+                    "Invalid library path identity; watching was not changed."
+                )
+            paths.append({key: path[key] for key in ("id", "libraryId", "path") if key in path})
+        ids = [p["id"] for p in paths if "id" in p]
+        if len(set(ids)) != len(ids) or len({p["path"] for p in paths}) != len(paths):
+            raise GrimmoryValidationError("Duplicate library path identity.")
+        body["paths"] = paths
+        return body
+
+    def _watch_read(self, library_id):
+        url = self._state["base_url"] + f"/api/v1/libraries/{library_id}"
+        return self._watch_body(_request_json(url, None, self._token), library_id)
+
+    def _watch_update(self, item, body, target):
+        item["status"] = "resume_pending" if target else "pause_pending"
+        item.pop("error", None)
+        # The receipt and its original value must be durable before a possibly ambiguous PUT.
+        self._save()
+        expected = {**body, "watch": target}
+        _request_json(
+            self._state["base_url"] + f"/api/v1/libraries/{item['library_id']}",
+            expected,
+            self._token,
+            method="PUT",
+        )
+        actual = self._watch_read(item["library_id"])
+        if actual != expected:
+            raise GrimmoryValidationError(
+                "Library settings changed or watching could not be verified; retry explicitly."
+            )
+
+    async def pause_watching(self, payload):
+        return await self._watch_operation(payload, resume=False)
+
+    async def resume_watching(self, payload):
+        return await self._watch_operation(payload, resume=True)
+
+    async def _watch_operation(self, payload, *, resume):
+        async with self._lock:
+            self._idle()
+            if not self._connected or not self._token:
+                raise GrimmoryValidationError("Reconnect Grimmory before changing watching.")
+            session = self._state.get("watcher_maintenance")
+            if resume:
+                if not session or payload.get("session_id") != session["session_id"]:
+                    raise GrimmoryValidationError("Select the saved watcher session to resume.")
+            else:
+                ids = payload.get("library_ids")
+                if (
+                    not isinstance(ids, list)
+                    or not ids
+                    or any(type(x) is not int or x <= 0 for x in ids)
+                    or len(set(ids)) != len(ids)
+                ):
+                    raise GrimmoryValidationError("Select unique library IDs to pause.")
+                known = {str(x["id"]) for x in self._state["libraries"]}
+                if any(str(x) not in known for x in ids):
+                    raise GrimmoryValidationError("Select discovered Grimmory libraries only.")
+                if session and session["status"] != "resumed":
+                    if set(ids) != {x["library_id"] for x in session["libraries"]}:
+                        raise GrimmoryConflictError(
+                            "Resume the saved watcher session before changing selection."
+                        )
+                else:
+                    session = dict(
+                        session_id=uuid.uuid4().hex,
+                        base_url=self._state["base_url"],
+                        status="partial",
+                        libraries=[dict(library_id=x, status="pending") for x in ids],
+                    )
+            if session["base_url"] != self._state["base_url"]:
+                raise GrimmoryConflictError(
+                    "Reconnect to the saved Grimmory instance before watcher recovery."
+                )
+            if not resume and any(
+                x["status"] in {"resume_pending", "restored"} for x in session["libraries"]
+            ):
+                raise GrimmoryConflictError("Finish resuming the saved watcher session first.")
+            self._acquire_process_lock()
+            try:
+                self._state["watcher_maintenance"] = session
+                session["status"] = "partial"
+                self._save()
+                worker = asyncio.create_task(
+                    asyncio.to_thread(self._watch_libraries, session, resume)
+                )
+                try:
+                    await asyncio.shield(worker)
+                except asyncio.CancelledError:
+                    # Cancelling the coroutine cannot stop its HTTP thread. Keep both locks
+                    # until it finishes, including when the caller cancels repeatedly.
+                    while not worker.done():
+                        try:
+                            await asyncio.shield(worker)
+                        except asyncio.CancelledError:
+                            continue
+                        except Exception:
+                            break
+                    if not worker.cancelled():
+                        worker.exception()  # Retrieve failures even when cancellation wins.
+                    raise
+            finally:
+                self._release_process_lock()
+            return self.status()
+
+    def _watch_libraries(self, session, resume):
+        for item in session["libraries"]:
+            try:
+                body = self._watch_read(item["library_id"])
+                if "original_watch" not in item:
+                    if resume:
+                        item["status"] = "restored"
+                        item.pop("error", None)
+                        continue
+                    item.update(
+                        original_watch=body["watch"],
+                        paths=copy.deepcopy(body["paths"]),
+                        name=body["name"],
+                    )
+                    self._save()
+                if item["paths"] != body["paths"]:
+                    raise GrimmoryValidationError(
+                        "Library paths changed; watcher recovery requires the original paths."
+                    )
+                if resume:
+                    if (
+                        item["original_watch"]
+                        and item["status"] in {"paused", "pause_pending", "resume_pending"}
+                        and not body["watch"]
+                    ):
+                        self._watch_update(item, body, True)
+                        body["watch"] = True
+                    item["status"] = "restored"
+                elif not item["original_watch"]:
+                    if body["watch"]:
+                        raise GrimmoryValidationError(
+                            "Watching was enabled externally; resume this session first."
+                        )
+                    item["status"] = "unmodified"
+                else:
+                    if body["watch"]:
+                        self._watch_update(item, body, False)
+                        body["watch"] = False
+                    item["status"] = "paused"
+                item.pop("error", None)
+                for library in self._state["libraries"]:
+                    if str(library["id"]) == str(item["library_id"]):
+                        library["watch"] = body["watch"]
+            except Exception as exc:
+                item["error"] = self._failure_message(
+                    exc, "Watcher request failed; retry explicitly."
+                )
+            finally:
+                self._save()
+        complete = {"restored"} if resume else {"paused", "unmodified"}
+        session["status"] = (
+            ("resumed" if resume else "paused")
+            if all(x["status"] in complete and "error" not in x for x in session["libraries"])
+            else "partial"
+        )
+        self._save()
+
     def _mappings(self, mappings):
         if not self.allowed_roots or not mappings:
             raise GrimmoryValidationError(
@@ -359,6 +591,22 @@ class GrimmoryManager:
         roots = []
         cleaned = []
         for mapping in mappings:
+            session = self._state.get("watcher_maintenance")
+            if session and session["status"] != "resumed":
+                receipt = next(
+                    (
+                        x
+                        for x in session["libraries"]
+                        if str(x["library_id"]) == str(mapping.get("library_id"))
+                    ),
+                    None,
+                )
+                if receipt and (
+                    receipt["status"] not in {"paused", "unmodified"} or "error" in receipt
+                ):
+                    raise GrimmoryValidationError(
+                        "Watcher state is unverified; recover the saved session first."
+                    )
             library = next(
                 (
                     x
@@ -372,9 +620,7 @@ class GrimmoryManager:
             ]:
                 raise GrimmoryValidationError("Mapping does not match a discovered library path.")
             if library["watch"]:
-                raise GrimmoryValidationError(
-                    "Disable Grimmory watching manually before library maintenance."
-                )
+                raise GrimmoryValidationError("Pause Grimmory watching before library maintenance.")
             root = _safe(Path(mapping.get("local_path", "")))
             if not any(root == _safe(p) or _safe(p) in root.parents for p in self.allowed_roots):
                 raise GrimmoryValidationError(

@@ -1464,3 +1464,7 @@ dd {
 #grimmory-message {
   color: var(--pink);
 }
+
+#grimmory-watcher-maintenance {
+  overflow-wrap: anywhere;
+}

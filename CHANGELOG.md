@@ -8,6 +8,8 @@
   backups, with restore support and no automatic runs.
 - Keep strict metadata and exact filenames; explicitly exclude the database and
   application state from folder backups.
+- Add explicit pause and restore controls for Grimmory library folder watching,
+  with saved original settings and recovery records.
 
 ### Fixed
 

@@ -167,7 +167,8 @@ async def _grimmory_action(request: Request, action: str) -> JSONResponse:
         raise HTTPException(status_code=400, detail="Grimmory request must be an object.")
     try:
         manager = _grimmory_manager()
-        operation = getattr(manager, action)
+        method = {"pause-watching": "pause_watching", "resume-watching": "resume_watching"}.get(action, action)
+        operation = getattr(manager, method)
         result = await operation() if action == "cancel" else await operation(payload)
     except ValueError as exc:
         from epub_optimizer.grimmory import GrimmoryValidationError
@@ -213,6 +214,16 @@ async def grimmory_cancel(request: Request) -> JSONResponse:
 @app.post("/grimmory/restore")
 async def grimmory_restore(request: Request) -> JSONResponse:
     return await _grimmory_action(request, "restore")
+
+
+@app.post("/grimmory/pause-watching")
+async def grimmory_pause_watching(request: Request) -> JSONResponse:
+    return await _grimmory_action(request, "pause-watching")
+
+
+@app.post("/grimmory/resume-watching")
+async def grimmory_resume_watching(request: Request) -> JSONResponse:
+    return await _grimmory_action(request, "resume-watching")
 
 
 @app.get("/health")

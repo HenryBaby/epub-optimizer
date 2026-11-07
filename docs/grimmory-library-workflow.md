@@ -8,6 +8,9 @@ mount configuration and connection testing.
 
 - A separate Grimmory tab connects to the configured instance and lists its
   libraries and paths using read-only API discovery.
+- Explicit pause/resume controls update only the selected libraries' watching
+  through the API, preserving every other library setting. They require admin or
+  manage-library permission. They never change book paths or source metadata.
 - Each remote library path must map explicitly to an allowed library mount in
   the optimizer container. No Docker socket or container introspection is used.
 - Users select libraries, preview the EPUB count and required backup space, and
@@ -74,6 +77,32 @@ it is not provided or implied by a library-folder restore.
 
 The optimizer must not attempt to pause, restart, inspect, or reconfigure host
 containers. No live integration or library mutation is part of development tests.
+
+Connect and select libraries, then use **Pause watching selected libraries** in
+EPUB Optimizer before previewing. This needs no local mount or preview. Review
+the persisted receipt: each library shows paused watching, already disabled
+watching, or an unverified/failed update. Retry the same selection explicitly to
+recover partial failures. This controls per-library watching only: queued imports,
+scans, metadata writes, and external writers can still run. Wait for queued work
+and pause other writers, including EPUB Optimizer watched Automation separately
+if it feeds Bookdrop. Its global automation setting is outside these API writes.
+
+Then map mounted paths, **Preview selected folders**, confirm external writers
+are paused, **Back up & optimize**, review results, and explicitly **Resume previous
+watching states**. Apply the same writer precautions before restore. The watching
+receipt survives restarts, and watching remains paused after completion until
+explicit resume. Reconnect to the same instance to recover it after restart.
+Resume restores originally enabled watching only; originally disabled libraries
+remain disabled. Partial failures stay visible for explicit recovery.
+
+`POST /grimmory/pause-watching` accepts `{"library_ids": [7, 8]}`;
+`POST /grimmory/resume-watching` accepts `{"session_id": "saved-session-id"}`.
+Both return status including `watcher_maintenance`, or null before a session.
+Status reads, connection, page loading, polling, job start/completion, and shutdown
+never issue watching writes. Watching changes are disabled during active jobs.
+Pausing invalidates any prior preview; refresh and preview again before starting.
+Folder selections and unsaved local mappings survive a watching-status rerender.
+These controls do not provide complete Grimmory maintenance or database backup.
 
 ## Interface and verification
 

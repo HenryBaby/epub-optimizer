@@ -65,19 +65,35 @@ own origin. Forwarding headers do not configure the allowed origin. If you see
 “Same-origin requests are required,” check this setting against the optimizer
 URL in your browser and have the proxy operator configure it accordingly.
 
-1. Pause Grimmory library watchers and any other processes that can write to the
-   selected folders. Keep them paused through backup, optimization, or restore.
-2. Connect using the Grimmory server URL and a local account with access to the
-   libraries. Credentials/tokens are not saved to the browser or persisted by
+1. Connect using the Grimmory server URL and a local account with admin or
+   manage-library permission. Credentials/tokens are not saved to the browser or persisted by
    the optimizer; reconnect after a restart or expired login.
-3. Map each selected Grimmory library path to its mounted path in the optimizer
-   container, then preview the scope and space requirements.
-4. Confirm the maintenance window and explicitly start the job. Every selected
+2. Select the library folders and click **Pause watching selected libraries**.
+   This uses Grimmory's API and requires neither a local mount nor a preview.
+   Review the saved receipt for paused libraries, already disabled watching, or
+   partial failures; retry the same selection explicitly if necessary.
+3. Wait for queued imports, scans, and metadata writes to finish, and pause other
+   writers to these folders. Pause EPUB Optimizer watched Automation separately
+   if it feeds Bookdrop. Watching controls do not stop these activities. Keep
+   writers paused through backup, optimization, or restore.
+4. Map each selected Grimmory library path to its mounted path in the optimizer
+   container, then **Preview selected folders** for scope and space requirements.
+5. Confirm the maintenance window and click **Back up & optimize**. Every selected
    file, including sidecars and non-EPUB formats, is copied to an independent,
    verified library-folder backup before any book is replaced.
-5. Review per-book results. EPUBs keep their exact names and relative paths;
+6. Review per-book results. EPUBs keep their exact names and relative paths;
    unsuccessful books retain their original bytes. Cancellation takes effect
    between operations. Backups are retained until you manage them explicitly.
+7. Click **Resume previous watching states** when ready. Watching remains paused
+   after job completion and application restarts until this explicit action.
+   Reconnect to the same Grimmory instance after a restart to recover the saved
+   session. Libraries whose watching was originally disabled remain disabled.
+
+Only explicit pause/resume clicks update library watching. The API writes preserve
+all other library settings and do not write source metadata or change book paths.
+Connecting, refreshing status, and starting or finishing jobs never automatically
+pause or resume watching. This is per-library watching control, not a complete
+Grimmory maintenance mode; external writers still require your confirmation.
 
 The library mode preserves the EPUB's bibliographic metadata and identifiers,
 including existing optimizer markers. Metadata repairs are disabled and the
@@ -100,11 +116,12 @@ changed temporary files remain untouched and require manual inspection.
 restored by this feature. Preserve those with your normal Grimmory backup
 procedure. A verified folder copy is not an atomic filesystem or database
 snapshot and requires the maintenance window above for consistency. The
-optimizer does not modify Grimmory's catalog through its API, but a later scan
+optimizer only updates library watching through its API; it does not update book
+metadata or paths, but a later scan
 can observe the changed EPUBs.
 
 The upstream API is unstable; the connection uses the documented login and
-library-discovery endpoints. See the
+library-discovery and per-library settings endpoints. See the
 [implementation contract](docs/grimmory-library-workflow.md) for the preservation
 and recovery boundaries. Development tests use temporary libraries and mocked
 Grimmory responses, never a live library.
