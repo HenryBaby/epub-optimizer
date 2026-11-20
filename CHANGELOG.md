@@ -3,6 +3,13 @@
 > Release dates below are the dates of the tagged commits. These historical
 > entries were backfilled; they do not establish exact publication times.
 
+## 1.3.1 - 2026-11-20
+
+### Fixed
+
+- Recognize long, explicitly attributed opening epigraphs within bounded quote
+  runs, repair stale paragraph roles, and preserve the following narrative opening.
+
 ## 1.3.0 - 2026-11-07
 
 ### Changed

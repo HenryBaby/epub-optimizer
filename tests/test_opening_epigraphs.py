@@ -111,7 +111,7 @@ def test_attribution_cannot_cross_structural_or_semantic_barriers(body: str) -> 
     "paragraphs",
     [
         ["Short line."] * 9,
-        ["x" * 901, "Short line."],
+        ["x" * 3601, "Short line."],
         ["x" * 800] * 5,
     ],
 )
@@ -131,3 +131,126 @@ def test_single_unattributed_opening_retains_existing_prologue_behavior() -> Non
     _classify_blocks(root, "body")
 
     assert _roles(root) == ["eo-extract", "eo-first"]
+
+
+@pytest.mark.parametrize("wrapped", [False, True])
+@pytest.mark.parametrize("stale", [False, True])
+@pytest.mark.parametrize(
+    "source",
+    [
+        '<p id="source"><b>--Collected Test Notes</b></p>',
+        '<p id="source">—Collected Test Notes</p>',
+        '<p id="source">–Collected Test Notes</p>',
+        '<p id="source" class="source">Collected Test Notes</p>',
+        '<p id="source" class="credit">Collected Test Notes</p>',
+        '<p id="source" class="attribution">Collected Test Notes</p>',
+    ],
+)
+def test_long_opening_epigraph_repairs_roles_and_preserves_content(
+    wrapped: bool, stale: bool, source: str
+) -> None:
+    # Match the failing quote's 922 characters and unitalicized punctuation.
+    quote_class = ' class="eo-first"' if stale else ""
+    narrative_class = ' class="eo-body"' if stale else ""
+    quote = f'<p id="quote"{quote_class}><i>{"q" * 921}</i>.</p>{source}'
+    if wrapped:
+        quote = f'<div id="quotation">{quote}</div>'
+    root = _document(
+        f'<h1>Chapter</h1>{quote}'
+        f'<p id="narrative"{narrative_class}>The narrative starts here.</p>'
+        '<p id="continuation">The story continues.</p>'
+    )
+    before_text = list(root.itertext())
+    before_structure = [(element.tag, element.get("id")) for element in root.iter()]
+
+    _classify_blocks(root, "body")
+
+    assert _roles(root) == ["eo-extract", "eo-extract", "eo-first", "eo-body"]
+    assert list(root.itertext()) == before_text
+    assert [(element.tag, element.get("id")) for element in root.iter()] == before_structure
+    first_pass = etree.tostring(root)
+    _classify_blocks(root, "body")
+    assert etree.tostring(root) == first_pass
+
+
+@pytest.mark.parametrize(
+    "lengths",
+    [[901], [3600], [901, 900, 900, 899], [901, 386, 386, 386, 386, 386, 386, 383]],
+)
+def test_explicit_source_accepts_long_quotes_within_total_bounds(lengths: list[int]) -> None:
+    quote = "".join(f'<p><i>{"q" * length}</i></p>' for length in lengths)
+    root = _document(f'<h1>Chapter</h1>{quote}<p>--Test Archive</p>')
+
+    assert len(_opening_epigraph_paragraphs(root, "body")) == len(lengths) + 1
+
+
+@pytest.mark.parametrize(
+    "lengths",
+    [[3601], [901, 900, 900, 900], [901] + [20] * 8],
+)
+def test_long_quotes_cannot_exceed_total_or_paragraph_bounds(lengths: list[int]) -> None:
+    quote = "".join(f'<p><i>{"q" * length}</i></p>' for length in lengths)
+    root = _document(f'<h1>Chapter</h1>{quote}<p>--Test Archive</p>')
+
+    assert not _opening_epigraph_paragraphs(root, "body")
+
+
+@pytest.mark.parametrize("source", ["", "<p><b>A Generic Heading</b></p>"])
+@pytest.mark.parametrize("length", [901, 922, 3600])
+def test_long_italic_narrative_requires_explicit_attribution(source: str, length: int) -> None:
+    root = _document(
+        f'<h1>Chapter</h1><p><i>{"q" * length}</i></p>{source}'
+        '<p>The narrative continues.</p>'
+    )
+
+    assert not _opening_epigraph_paragraphs(root, "body")
+    _classify_blocks(root, "body")
+    assert _roles(root)[0] == "eo-first"
+    assert _roles(root)[-1] == "eo-body"
+
+
+@pytest.mark.parametrize(
+    "quote_template",
+    [
+        '<div>{quote}</div><p>--Outside the wrapper</p>',
+        '{quote}<h2>Section</h2><p>--Archive</p>',
+        '{quote}<p>* * *</p><p>--Archive</p>',
+        '{quote}<hr/><p>--Archive</p>',
+        '{quote}<p><img src="test.png" alt="Illustration"/></p><p>--Archive</p>',
+        '<div class="letter">{quote}<p>--Archive</p></div>',
+        '<div class="poetry">{quote}<p>--Archive</p></div>',
+        '<div class="footnote">{quote}<p>--Archive</p></div>',
+        '<blockquote>{quote}<p>--Archive</p></blockquote>',
+        '<p class="poetry"><i>{text}</i></p><p>--Archive</p>',
+        '<p class="footnote"><i>{text}</i></p><p>--Archive</p>',
+        '{quote}<p class="poetry"><i>A verse line.</i></p><p>--Archive</p>',
+    ],
+)
+def test_long_quote_attribution_respects_structural_and_semantic_barriers(
+    quote_template: str,
+) -> None:
+    text = "q" * 922
+    quote = f'<p><i>{text}</i></p>'
+    root = _document(f'<h1>Chapter</h1>{quote_template.format(quote=quote, text=text)}')
+
+    assert not _opening_epigraph_paragraphs(root, "body")
+
+
+@pytest.mark.parametrize("length, expected", [(900, True), (901, False)])
+def test_single_unattributed_quote_keeps_legacy_length_limit(length: int, expected: bool) -> None:
+    root = _document(
+        f'<h1>Chapter</h1><p><i>{"q" * length}</i></p><p>The narrative starts.</p>'
+    )
+
+    assert bool(_opening_epigraph_paragraphs(root, "body")) is expected
+
+
+def test_short_quote_still_accepts_bold_only_attribution() -> None:
+    root = _document(
+        '<h1>Chapter</h1><p><i>A synthetic quotation.</i></p>'
+        '<p><b>Collected Test Notes</b></p><p>The narrative starts.</p>'
+    )
+
+    _classify_blocks(root, "body")
+
+    assert _roles(root) == ["eo-extract", "eo-extract", "eo-first"]

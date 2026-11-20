@@ -2670,6 +2670,7 @@ def _opening_epigraph_paragraphs(
     """Find bounded opening quotations before trusting old optimizer classes.
 
     A multi-paragraph quotation needs an attribution in the same sibling run.
+    Paragraphs over 900 characters additionally require an explicit source.
     Container edges, headings and other blocks cannot connect unrelated italics.
     Preserve the legacy single-paragraph opening heuristic, but never use it to
     accept an ambiguous run of multiple italic paragraphs without a source.
@@ -2705,6 +2706,7 @@ def _opening_epigraph_paragraphs(
             continue
         quote = []
         total_length = 0
+        needs_explicit_attribution = False
         current = first
         # At most eight quote paragraphs plus a short source line, and no more
         # than 3,600 quote characters. Long italic narrative must remain prose.
@@ -2723,16 +2725,19 @@ def _opening_epigraph_paragraphs(
                 in {"eo-poetry", "eo-footnote", "eo-caption", "eo-hanging"}
             ):
                 break
-            if quote and _is_opening_epigraph_attribution(current):
+            if quote and _is_opening_epigraph_attribution(
+                current, explicit_only=needs_explicit_attribution
+            ):
                 result.update([*quote, current])
                 break
             text = _normalized_text(current)
-            if not text or len(text) > 900 or _emphasized_text_ratio(current) < 0.65:
+            if not text or _emphasized_text_ratio(current) < 0.65:
+                break
+            if len(quote) >= 8 or total_length + len(text) > 3600:
                 break
             quote.append(current)
             total_length += len(text)
-            if len(quote) > 8 or total_length > 3600:
-                break
+            needs_explicit_attribution |= len(text) > 900
             current = current.getnext()
         following = first.getnext()
         has_italic_continuation = (
@@ -2758,7 +2763,9 @@ def _is_opening_epigraph_paragraph(element: etree._Element) -> bool:
     return _emphasized_text_ratio(element) >= 0.65
 
 
-def _is_opening_epigraph_attribution(element: etree._Element) -> bool:
+def _is_opening_epigraph_attribution(
+    element: etree._Element, *, explicit_only: bool = False
+) -> bool:
     text = _normalized_text(element)
     if not text or len(text) > 140:
         return False
@@ -2767,7 +2774,7 @@ def _is_opening_epigraph_attribution(element: etree._Element) -> bool:
     classes = set(element.attrib.get("class", "").lower().split())
     if classes & {"attribution", "source", "credit"}:
         return True
-    return _bold_text_ratio(element) >= 0.6 and len(text.split()) <= 12
+    return not explicit_only and _bold_text_ratio(element) >= 0.6 and len(text.split()) <= 12
 
 
 def _emphasized_text_ratio(element: etree._Element) -> float:
