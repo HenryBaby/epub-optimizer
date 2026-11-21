@@ -88,7 +88,7 @@ URL in your browser and have the proxy operator configure it accordingly.
 1. Connect using the Grimmory server URL and a local account with admin or
    manage-library permission. Credentials/tokens are not saved to the browser or persisted by
    the optimizer; reconnect after a restart or expired login.
-2. Select the library folders and click **Pause watching selected libraries**.
+2. Select the library folders and click **Pause watching**.
    This uses Grimmory's API and requires neither a local mount nor a preview.
    Review the saved receipt for paused libraries, already disabled watching, or
    partial failures; retry the same selection explicitly if necessary.
@@ -97,14 +97,14 @@ URL in your browser and have the proxy operator configure it accordingly.
    if it feeds Bookdrop. Watching controls do not stop these activities. Keep
    writers paused through backup, optimization, or restore.
 4. Map each selected Grimmory library path to its mounted path in the optimizer
-   container, then **Preview selected folders** for scope and space requirements.
+   container, then **Preview folders** for scope and space requirements.
 5. Confirm the maintenance window and click **Back up & optimize**. Every selected
    file, including sidecars and non-EPUB formats, is copied to an independent,
    verified library-folder backup before any book is replaced.
 6. Review per-book results. EPUBs keep their exact names and relative paths;
    unsuccessful books retain their original bytes. Cancellation takes effect
    between operations. Backups are retained until you manage them explicitly.
-7. Click **Resume previous watching states** when ready. Watching remains paused
+7. Click **Resume watching** when ready. Watching remains paused
    after job completion and application restarts until this explicit action.
    Reconnect to the same Grimmory instance after a restart to recover the saved
    session. Libraries whose watching was originally disabled remain disabled.
@@ -122,6 +122,21 @@ CSS, fonts, content presentation, and navigation may still be normalized, so
 file bytes and hashes change. Official EPUBCheck must be available before a
 library original can be replaced; pre-existing validation issues may remain
 reported as `legacy_issues`.
+
+The Grimmory workspace uses **Optimize**, **Backups**, and **History** views.
+Watching status and pause/resume controls stay together above the current view.
+Connection settings collapse after connection. Optimize shows the current
+workflow; Reader sync remains available after a saved successful optimization.
+Changing views or snapshot selection clears the writer acknowledgement, so a
+restore always requires its own fresh confirmation.
+
+In **Backups**, select a snapshot to see its date, file count, size, and folder
+scope. **Delete backup** permanently removes only that local backup after a
+confirmation naming its identity and date; current library files are unchanged.
+Deletion needs no Grimmory connection, but is blocked during an active operation
+or pending reader-sync watching recovery. Interrupted deletion remains listed as
+pending deletion; **Retry deletion** completes cleanup explicitly. Keep any
+backup you may still need for restore or reader-sync refresh.
 
 Restore is an explicit action on a retained library-folder backup. Snapshot
 integrity and live-file conflicts are checked before restoration. External

@@ -11,6 +11,13 @@
   Grimmory EPUBs, with read-only KOSync verification, identical-byte publication,
   temporary watching recovery and a separate writer acknowledgement.
 
+### Changed
+
+- Match Grimmory to the shared application width and separate Optimize, Backups,
+  and History, with grouped watching controls and contextual maintenance checks.
+- Manage individual local backups with scoped details, distinct restore/delete
+  actions, irreversible deletion confirmation, and retry for interrupted cleanup.
+
 ## 1.3.1 - 2026-11-20
 
 ### Fixed

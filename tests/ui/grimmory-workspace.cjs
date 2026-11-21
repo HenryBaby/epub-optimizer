@@ -43,7 +43,7 @@ function fixture() {
   return {
     state: { connected: false, base_url: null, libraries: [], mappings: [], active_job: null,
       job: null, history: [], snapshots: [], watcher_maintenance: null },
-    posts: [], reads: 0, unexpected: [], partial: false, failStatus: false, syncAuthError: false,
+    posts: [], reads: 0, unexpected: [], partial: false, failStatus: false, syncAuthError: false, deleteFailure: false,
     receipt(partial = false) {
       return { session_id: 'watch-session-1', base_url: 'http://grimmory.test:6060',
         status: partial ? 'partial' : 'paused', libraries: [
@@ -92,6 +92,11 @@ function fixture() {
             if (current) current.watch = library.original_watch;
           });
           break;
+        case 'delete-snapshot':
+          assert.deepEqual(payload, { snapshot_id: this.expectedDeleteId || 'backup-1', confirmed: true });
+          assert(!this.state.active_job && !this.state.sync_watching_recovery);
+          this.state.snapshots = this.state.snapshots.filter(record => (record.snapshot_id || record.id) !== payload.snapshot_id);
+          break;
         case 'restore':
           assert.deepEqual(payload, { snapshot_id: this.expectedRestoreId || 'backup-1', maintenance_confirmed: true });
           this.state.job = { id: 'restore-1', status: 'restoring', results: [] };
@@ -128,6 +133,8 @@ async function setup(browser, mock, options = {}) {
       // Chromium logs the intentionally injected HTTP failure as a resource error.
       if (mock.failStatus && message.location().url === `${origin}/grimmory` &&
           /Failed to load resource.*503/.test(message.text())) return;
+      if (mock.deleteFailure && message.location().url === `${origin}/grimmory/delete-snapshot` &&
+          /Failed to load resource.*503/.test(message.text())) return;
       if (mock.syncAuthError && message.location().url === `${origin}/grimmory/refresh-sync` &&
           /Failed to load resource.*401/.test(message.text())) return;
       errors.push(message.text());
@@ -157,6 +164,12 @@ async function setup(browser, mock, options = {}) {
       return json(mock.state);
     }
     if (req.method() === 'POST' && url.pathname.startsWith('/grimmory/')) {
+      if (mock.deleteFailure && url.pathname.endsWith('/delete-snapshot')) {
+        mock.posts.push({ action: 'delete-snapshot', payload: req.postDataJSON() });
+        mock.state.snapshots.find(record => record.snapshot_id === req.postDataJSON().snapshot_id).status = 'deleting';
+        return route.fulfill({ status: 503, contentType: 'application/json',
+          body: JSON.stringify({ detail: 'Backup deletion incomplete. Retry to finish cleanup.' }) });
+      }
       if (mock.syncAuthError && url.pathname.endsWith('/refresh-sync')) {
         mock.posts.push({ action: 'refresh-sync', payload: req.postDataJSON() });
         return route.fulfill({ status: 401, contentType: 'application/json',
@@ -198,7 +211,7 @@ async function connect(page) {
   await page.getByLabel('Username', { exact: true }).fill('fixture-admin');
   await page.getByLabel('Password', { exact: true }).fill('fixture-only-password');
   await page.getByRole('button', { name: 'Connect', exact: true }).click();
-  await page.locator('#grimmory-mappings input[type="checkbox"]').first().waitFor();
+  await page.locator('#grimmory-mappings input[type="checkbox"]').first().waitFor({ state: 'attached' });
   assert.equal(await page.locator('#grimmory-password').inputValue(), '', 'Password is cleared');
 }
 async function selectFolders(page) {
@@ -239,6 +252,97 @@ async function check(name, task) {
 (async () => {
   const browser = await chromium.launch({ headless: true });
   try {
+    await check('workspace widths match app tabs and contextual navigation keeps one workflow visible', async () => {
+      for (const width of [1440, 390]) {
+        const s = await setup(browser, fixture(), { viewport: { width, height: 1000 } });
+        const { page } = s;
+        const bounds = [];
+        for (const tab of ['optimizer', 'automation', 'grimmory']) {
+          await page.locator(`[data-tab="${tab}"]`).click();
+          bounds.push(await page.locator('.shell').boundingBox());
+        }
+        for (const bound of bounds) assert.equal(bound.width, bounds[0].width, 'Every app tab uses the same shell width');
+        const panel = await page.locator('.grimmory-panel').boundingBox();
+        assert.equal(Math.round(panel.width), Math.round(bounds[0].width), 'Grimmory panel fills the shared app shell');
+        await connect(page);
+        await selectFolders(page);
+        await page.locator('#grimmory-preview').click();
+        await page.locator('#grimmory-maintenance').check();
+        assert.equal(await page.locator('.grimmory-panel input[type="checkbox"]:visible').count(), 1, 'Prepare has one writer acknowledgement');
+        await page.locator('[data-grimmory-view="backups"]').click();
+        assert(await page.locator('#grimmory-backups-view').isVisible());
+        await text(page, '#grimmory-next-step', /Choose a snapshot to restore files or free backup space/);
+        assert(!(await page.locator('#grimmory-prepare-step').isVisible()));
+        await page.locator('[data-grimmory-view="history"]').click();
+        assert(await page.getByRole('heading', { name: 'Run history' }).isVisible());
+        await text(page, '#grimmory-next-step', /Review previous runs and per-file results/);
+        await page.locator('[data-grimmory-view="optimize"]').click();
+        assert(!(await page.locator('#grimmory-maintenance').isChecked()), 'Changing operation context clears writer permission');
+        assert(await page.locator('#grimmory-start').isDisabled());
+        assert.equal(await page.locator('#grimmory-pause-watching').count(), 1);
+        assert.equal(await page.locator('#grimmory-resume-watching').count(), 1);
+        assert(await page.locator('#grimmory-pause-watching').evaluate(node => node.closest('#grimmory-watching') !== null), 'Watching action belongs to its status');
+        assert.deepEqual(s.mock.posts.map(post => post.action), ['connect', 'preview'], 'Local navigation never starts work');
+        await noOverflow(page);
+        await finish(s);
+      }
+    });
+    await check('offline backup deletion needs identity confirmation, preserves other backups, and guards active work and recovery', async () => {
+      const mock = fixture();
+      const second = { ...clone(snapshot), snapshot_id: 'backup-2', created_at: snapshot.created_at + 100 };
+      mock.state.snapshots = [clone(snapshot), second];
+      const s = await setup(browser, mock);
+      const { page } = s;
+      await page.locator('[data-grimmory-view="backups"]').click();
+      const select = page.getByLabel('Snapshot', { exact: true });
+      const remove = page.locator('#grimmory-delete-snapshot');
+      assert(await remove.isDisabled(), 'No implicit backup selection');
+      await select.selectOption('backup-1');
+      assert(await remove.isEnabled(), 'Local deletion needs no Grimmory connection');
+      assert(await page.locator('#grimmory-restore').isDisabled());
+      let confirmation = '';
+      page.once('dialog', async dialog => { confirmation = dialog.message(); await dialog.dismiss(); });
+      await remove.click();
+      assert.match(confirmation, /backup-1/);
+      assert(confirmation.includes(new Date(snapshot.created_at * 1000).toLocaleString()));
+      assert.match(confirmation, /cannot be undone/i);
+      assert.equal(mock.posts.length, 0, 'Cancel never deletes');
+      mock.state.active_job = 'active-1';
+      mock.state.job = { id: 'active-1', status: 'running', results: [] };
+      await page.locator('#grimmory-refresh').click();
+      await page.waitForFunction(() => document.querySelector('#grimmory-delete-snapshot').disabled);
+      await remove.dispatchEvent('click');
+      assert.equal(mock.posts.length, 0, 'Active work guards synthetic clicks');
+      mock.state.active_job = null; mock.state.job = null;
+      mock.state.sync_watching_recovery = { job_id: 'sync-2', libraries: [] };
+      await page.locator('#grimmory-refresh').click();
+      assert(await remove.isDisabled());
+      await remove.dispatchEvent('click');
+      assert.equal(mock.posts.length, 0, 'Pending watching recovery blocks deletion');
+      mock.state.sync_watching_recovery = null;
+      await page.locator('#grimmory-refresh').click();
+      await page.waitForFunction(() => !document.querySelector('#grimmory-delete-snapshot').disabled);
+      mock.deleteFailure = true;
+      page.once('dialog', dialog => dialog.accept());
+      await remove.click();
+      await text(page, '#grimmory-message', /Backup deletion incomplete/);
+      await text(page, '#grimmory-snapshot-details', /Pending deletion/);
+      assert.equal(await remove.textContent(), 'Retry deletion');
+      assert(await page.locator('#grimmory-restore').isDisabled(), 'Incomplete deletion cannot restore');
+      await page.screenshot({ path: path.join(artifacts, 'desktop-backup-delete-retry.png'), fullPage: true });
+      mock.deleteFailure = false;
+      page.once('dialog', dialog => dialog.accept());
+      await remove.click();
+      await text(page, '#grimmory-message', /Backup deleted permanently/);
+      assert.deepEqual(mock.posts, [0, 1].map(() => ({ action: 'delete-snapshot', payload: { snapshot_id: 'backup-1', confirmed: true } })));
+      assert.equal(await select.inputValue(), '', 'Removed selection clears without choosing another backup');
+      assert.equal(await page.locator('#grimmory-snapshot-details').textContent(), '');
+      assert.deepEqual(await select.locator('option').evaluateAll(nodes => nodes.map(node => node.value)), ['', 'backup-2']);
+      assert(await remove.isDisabled());
+      assert(await page.locator('#grimmory-history-view').isHidden());
+      await noOverflow(page);
+      await finish(s);
+    });
     await check('reader sync is explicit, uses optimization source, clears credentials and reports verification', async () => {
       const mock = syncFixture();
       const s = await setup(browser, mock);
@@ -354,19 +458,20 @@ async function check(name, task) {
       assert(await page.locator('#grimmory-cancel').isEnabled(), 'Safe cancellation stays available');
       const results = page.locator('#grimmory-progress details');
       await results.locator('summary').click();
-      const history = page.locator('#grimmory-past-activity');
-      await history.locator('summary').click();
-      await history.locator('summary').focus();
+      const history = page.locator('[data-grimmory-view="history"]');
+      await history.click();
+      await history.focus();
       const reads = mock.reads;
       mock.state.job.message = 'Polling update: review the source EPUB before retrying.';
       // Await a changed server fixture via the actual 1500ms timer, without a fixed sleep.
       await text(page, '#grimmory-progress', /Polling update/);
       assert(mock.reads > reads, 'Active work polls status');
       assert(await results.evaluate(node => node.open), 'Polling preserves expanded per-file errors');
-      assert(await history.evaluate(node => node.open), 'Polling preserves expanded history');
-      assert(await history.locator('summary').evaluate(node => node === document.activeElement), 'Polling preserves keyboard focus');
+      assert(await page.locator('#grimmory-history-view').isVisible(), 'Polling preserves selected history view');
+      assert(await history.evaluate(node => node === document.activeElement), 'Polling preserves keyboard focus');
       assert.equal(await page.locator('#grimmory-mappings input[type="text"]').first().inputValue(), '/libraries/fiction-draft');
       assert(await page.locator('#grimmory-mappings input[type="checkbox"]').first().isChecked());
+      await page.locator('[data-grimmory-view="optimize"]').click();
       await page.screenshot({ path: path.join(artifacts, 'desktop-active.png'), fullPage: true });
       mock.state.job = clone(completed);
       mock.state.active_job = null;
@@ -377,6 +482,7 @@ async function check(name, task) {
       assert.equal(mock.state.watcher_maintenance.status, 'paused');
       assert(!mock.posts.some(item => item.action === 'resume-watching'), 'Completion never automatically resumes watching');
       await page.screenshot({ path: path.join(artifacts, 'desktop-result.png'), fullPage: true });
+      await page.locator('[data-grimmory-view="backups"]').click();
       const snapshots = page.getByLabel('Snapshot', { exact: true });
       assert.equal(await snapshots.inputValue(), '', 'Backups require an explicit snapshot selection');
       await snapshots.selectOption('backup-1');
@@ -411,10 +517,10 @@ async function check(name, task) {
       mock.state.snapshots = [clone(snapshot), clone(second)];
       const s = await setup(browser, mock);
       const { page } = s;
-      await page.locator('#grimmory-past-activity > summary').click();
+      await page.locator('[data-grimmory-view="backups"]').click();
       const select = page.getByLabel('Snapshot', { exact: true });
       const restore = page.getByRole('button', { name: 'Restore snapshot', exact: true });
-      assert(await select.isDisabled(), 'Snapshot selection needs a connection');
+      assert(await select.isEnabled(), 'Local backups can be browsed without a connection');
       assert(await restore.isDisabled());
       await connect(page);
       assert.equal(await select.inputValue(), '');
@@ -429,7 +535,7 @@ async function check(name, task) {
       assert(await restore.isDisabled());
       await text(page, '#grimmory-snapshot-details', /1 folders · 7 EPUBs · 9 files/);
       await text(page, '#grimmory-snapshot-details', /\/books\/essays → \/libraries\/essays/);
-      assert.equal(await page.locator('#grimmory-snapshots button').count(), 1, 'One restore action for the chosen snapshot');
+      assert.equal(await page.locator('#grimmory-snapshots button').count(), 2, 'Distinct restore and delete actions for the chosen snapshot');
       assert.deepEqual(mock.posts.map(item => item.action), ['connect'], 'Choosing snapshots never POSTs');
       await page.locator('#grimmory-maintenance').check();
       await select.focus();
@@ -479,7 +585,7 @@ async function check(name, task) {
       mock.state.connected = false;
       await page.locator('#grimmory-refresh').click();
       await text(page, '#grimmory-pill', /Disconnected/);
-      assert(await select.isDisabled());
+      assert(await select.isEnabled(), 'Disconnected users can still manage local backups');
       assert(await restore.isDisabled());
       await restore.dispatchEvent('click');
       assert.deepEqual(mock.posts.map(item => item.action), ['connect'], 'Disconnected state cannot restore through a dispatched click');
@@ -578,7 +684,8 @@ async function check(name, task) {
       await mounted.focus();
       await s.page.keyboard.press('Tab');
       assert(await s.page.evaluate(() => document.activeElement !== document.body), 'Tab moves focus to an interactive control');
-      await s.page.locator('#grimmory-past-activity > summary').click();
+      await s.page.screenshot({ path: path.join(artifacts, 'mobile-optimize-dark.png'), fullPage: true });
+      await s.page.locator('[data-grimmory-view="backups"]').click();
       const select = s.page.getByLabel('Snapshot', { exact: true });
       await select.selectOption('backup-1');
       await select.focus();

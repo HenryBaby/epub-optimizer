@@ -90,10 +90,6 @@ body::before {
   margin: 32px auto;
 }
 
-.shell:has(.tab-panel-active[data-tab-panel="grimmory"]) {
-  max-width: 920px;
-}
-
 .topbar {
   display: flex;
   gap: 24px;
@@ -1439,7 +1435,7 @@ dd {
 
 .app-tabs { margin-bottom: 20px; }
 .queue-panel { margin-bottom: 20px; }
-.grimmory-panel { max-width: 920px; margin-inline: auto; gap: 22px; padding: 30px; }
+.grimmory-panel { width: 100%; min-width: 0; gap: 20px; padding: 30px; }
 .grimmory-panel .panel-heading { margin-bottom: 0; }
 .grimmory-panel .panel-heading .status-pill { justify-self: start; }
 .grimmory-panel .eyebrow { color: var(--muted); }
@@ -1527,3 +1523,23 @@ dd {
 .grimmory-reader-sync .field-row input { min-width: 0; width: 100%; }
 .grimmory-reader-sync form > button { justify-self: start; }
 #grimmory-sync-recovery { overflow-wrap: anywhere; }
+
+/* Local navigation keeps maintenance tasks in a single, focused workspace. */
+.grimmory-nav { display: flex; gap: 6px; border-bottom: 1px solid var(--border); padding-bottom: 12px; }
+.grimmory-nav button { background: transparent; color: var(--muted); border: 1px solid transparent; padding: 10px 16px; }
+.grimmory-nav button[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.grimmory-view { display: grid; gap: 20px; min-width: 0; }
+.grimmory-watching { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+.grimmory-watching .grimmory-actions { align-items: center; }
+.grimmory-watching ul { margin-block: 6px; }
+.grimmory-backup-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; padding-top: 18px; border-top: 1px solid var(--border); }
+.grimmory-backup-actions > div { display: grid; gap: 10px; justify-items: start; align-content: start; }
+.grimmory-backup-actions .danger-action { color: var(--danger); border-color: var(--danger); }
+.grimmory-reader-sync { padding: 18px; border: 1px solid var(--border); border-radius: 10px; }
+.grimmory-reader-sync > summary { color: var(--text); font-size: 16px; font-weight: 600; }
+@media (max-width: 640px) {
+  .grimmory-watching, .grimmory-backup-actions { grid-template-columns: minmax(0, 1fr); }
+  .grimmory-nav { gap: 0; }
+  .grimmory-nav button { flex: 1; padding: 10px 8px; }
+  .grimmory-nav .notice { display: block; }
+}

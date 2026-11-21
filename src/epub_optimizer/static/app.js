@@ -1240,6 +1240,7 @@ function downloadJson(filename, value) {
   let busyAction = "";
   let selectedSnapshotId = "";
   let syncSourceId = "";
+  let workspaceView = "optimize";
   const renderSignatures = new Map();
 
   function message(text, error = false) {
@@ -1314,7 +1315,9 @@ function downloadJson(filename, value) {
     find("start").disabled = writingLocked || !plan?.plan_id || !maintenance.checked;
     find("cancel").disabled = busy || !active();
     find("refresh").disabled = busy;
-    find("snapshot-select").disabled = locked || !state.connected || !availableSnapshots().length;
+    find("snapshot-select").disabled = locked || !availableSnapshots().length;
+    find("delete-snapshot").disabled = writingLocked || !selectedSnapshot();
+    find("delete-snapshot").textContent = busy && busyAction === "delete-snapshot" ? "Deleting…" : selectedSnapshot()?.status === "deleting" ? "Retry deletion" : "Delete backup";
     find("restore").disabled = writingLocked || !state.connected || !maintenance.checked || !restorableSnapshot();
     const source = syncSource();
     const nextSourceId = source?.id || source?.job_id || "";
@@ -1323,7 +1326,7 @@ function downloadJson(filename, value) {
       find("kosync-password").value = "";
       syncSourceId = nextSourceId;
     }
-    find("reader-sync").hidden = !source;
+    find("reader-sync").hidden = !source || Boolean(plan);
     find("sync-source").textContent = source ? `Optimization run · ${snapshotDate(source)} · ${source.results.filter((result) => result.status === "optimized").length} optimized books` : "";
     find("sync-form").querySelectorAll("input").forEach((node) => { node.disabled = locked; });
     find("refresh-sync").disabled = writingLocked || !state.connected || !source ||
@@ -1344,14 +1347,26 @@ function downloadJson(filename, value) {
     });
     find("folder-step").hidden = step !== "folders";
     find("prepare-step").hidden = step !== "prepare";
-    const watchingActions = find(step === "prepare" ? "prepare-actions" : "folder-actions");
-    if (find("pause-watching").parentElement !== watchingActions) watchingActions.append(find("pause-watching"));
     find("progress").hidden = !["run", "review"].includes(step);
-    find("maintenance-confirmation").hidden = !plan && !find("past-activity").open;
+    panel.querySelectorAll("[data-grimmory-view]").forEach((node) => {
+      node.setAttribute("aria-pressed", String(node.dataset.grimmoryView === workspaceView));
+    });
+    for (const view of ["optimize", "backups", "history"]) find(`${view}-view`).hidden = view !== workspaceView;
+    const confirmationTarget = workspaceView === "backups" ? find("restore-confirmation") : find("prepare-step");
+    if (find("maintenance-confirmation").parentElement !== confirmationTarget) confirmationTarget.append(find("maintenance-confirmation"));
+    find("maintenance-confirmation").hidden = workspaceView === "backups" ? !state.connected || !restorableSnapshot() : step !== "prepare";
+    find("maintenance-label").textContent = `${workspaceView === "backups" ? "Ready to restore this snapshot" : "Ready to optimize"}: watching is paused, queued tasks have finished, and other writers are stopped.`;
+    // Keep the workflow action beside its acknowledgement, with no duplicate controls.
+    if (find("operation-actions").parentElement !== find("prepare-step")) find("prepare-step").append(find("operation-actions"));
+    if (active()) {
+      if (find("cancel").parentElement !== find("optimize-view")) find("optimize-view").insertBefore(find("cancel"), find("review-actions"));
+    } else if (find("cancel").parentElement !== find("operation-actions")) find("operation-actions").append(find("cancel"));
+    find("pause-watching").hidden = Boolean(pendingReceipt && sameSelection && receipt.status === "paused");
+    find("resume-watching").hidden = !pendingReceipt;
     find("start").hidden = step !== "prepare";
     find("cancel").hidden = !active();
     find("review-actions").hidden = step !== "review";
-    find("next-step").textContent = {
+    find("next-step").textContent = workspaceView === "backups" ? "Choose a snapshot to restore files or free backup space." : workspaceView === "history" ? "Review previous runs and per-file results." : {
       connect: "Connect to choose the folders you want to optimize.",
       folders: "Choose folders, pause watching, then preview the backup scope.",
       prepare: "Review the scope and confirm writers are paused before starting.",
@@ -1434,8 +1449,11 @@ function downloadJson(filename, value) {
     const target = find("watcher-maintenance");
     target.replaceChildren();
     const receipt = state.watcher_maintenance;
-    find("watching").hidden = !receipt;
-    if (!receipt) return;
+    find("watching").hidden = !receipt && !state.connected;
+    if (!receipt) {
+      target.append(element("h3", "Library watching"), element("p", state.connected ? "Pause watching for selected libraries before maintaining files. Other writers must be stopped separately." : "Connect to manage library watching."));
+      return;
+    }
     const pending = receipt.status !== "resumed";
     find("watching").classList.toggle("watching-pending", pending);
     find("resume-watching").hidden = !pending;
@@ -1565,7 +1583,7 @@ function downloadJson(filename, value) {
 
   function restorableSnapshot() {
     const record = selectedSnapshot();
-    return record && (!record.plan?.base_url || record.plan.base_url === state.base_url) ? record : null;
+    return record && record.status !== "deleting" && (!record.plan?.base_url || record.plan.base_url === state.base_url) ? record : null;
   }
 
   function snapshotDate(record) {
@@ -1577,7 +1595,7 @@ function downloadJson(filename, value) {
     target.replaceChildren();
     const record = selectedSnapshot();
     if (!record) return;
-    target.append(element("p", `${snapshotDate(record)} · Snapshot status: ${record.status || "available"}`));
+    target.append(element("p", `${snapshotDate(record)} · Snapshot status: ${record.status === "deleting" ? "Pending deletion — retry Delete backup to finish cleanup" : record.status || "available"}`));
     const scope = record.plan || {};
     target.append(element("p", `${(scope.mappings || []).length} folders · ${scope.epub_count || 0} EPUBs · ${scope.files || 0} files · ${formatBytes(scope.bytes || 0)}`));
     const folders = element("ul", undefined, "change-report");
@@ -1588,7 +1606,7 @@ function downloadJson(filename, value) {
     const technical = element("details", undefined, "grimmory-help");
     technical.append(element("summary", "Snapshot ID"), element("p", record.snapshot_id || record.id, "technical-id"));
     target.append(technical);
-    if (!restorableSnapshot()) target.append(element("p", "Connect to the Grimmory instance used by this snapshot before restoring.", "notice"));
+    if (record.status !== "deleting" && !restorableSnapshot()) target.append(element("p", "Connect to the Grimmory instance used by this snapshot before restoring.", "notice"));
   }
 
   function renderSnapshots() {
@@ -1647,7 +1665,7 @@ function downloadJson(filename, value) {
     });
     renderChanged("history", state.history || state.jobs || [], (target) => renderRecords(target, state.history || state.jobs));
     renderChanged("snapshots", [state.snapshots || [], state.base_url], renderSnapshots);
-    find("activity-count").textContent = `${(state.history || state.jobs || []).length} runs · ${(state.snapshots || []).length} backups`;
+    find("activity-count").textContent = `(${(state.history || state.jobs || []).length})`;
     updateControls();
     clearTimeout(pollTimer);
     if (active()) pollTimer = setTimeout(loadStatus, 1500);
@@ -1692,19 +1710,23 @@ function downloadJson(filename, value) {
         invalidatePlan();
         maintenance.checked = false;
       } else if (["start", "restore", "refresh-sync", "restore-sync-watching"].includes(action)) {
+        workspaceView = "optimize";
         choosingFolders = false;
         invalidatePlan();
         maintenance.checked = false;
       }
       if (["connect", "pause-watching", "resume-watching"].includes(action)) render(result, true);
+      else if (action === "delete-snapshot") render(result);
       else render(await request(""));
-      if (action === "preview") message("Preview ready. Confirm maintenance before starting.");
+      if (action === "delete-snapshot") message("Backup deleted permanently. Library files were not changed.");
+      else if (action === "preview") message("Preview ready. Confirm maintenance before starting.");
       else if (action === "pause-watching") {
         const receipt = state.watcher_maintenance;
         const paused = receipt?.status === "paused" && !receipt.libraries?.some((library) => library.error);
         message(paused ? "Watching paused. Preview folders to continue." : "Watching updated. Review any watching errors, then preview folders again to confirm the current scope.");
       }
     } catch (error) {
+      if (action === "delete-snapshot") await loadStatus();
       message(error.message, true);
     } finally {
       busy = false;
@@ -1781,7 +1803,23 @@ function downloadJson(filename, value) {
     run("restore", { snapshot_id: id, maintenance_confirmed: true });
   });
   maintenance.addEventListener("change", updateControls);
-  find("past-activity").addEventListener("toggle", updateControls);
+  panel.querySelectorAll("[data-grimmory-view]").forEach((node) => node.addEventListener("click", () => {
+    if (workspaceView !== node.dataset.grimmoryView) {
+      maintenance.checked = false;
+      find("sync-maintenance").checked = false;
+    }
+    workspaceView = node.dataset.grimmoryView;
+    updateControls();
+  }));
+  find("delete-snapshot").addEventListener("click", () => {
+    if (busy || active() || state.sync_watching_recovery) return;
+    const record = selectedSnapshot();
+    if (!record) return;
+    const id = record.snapshot_id || record.id;
+    if (!window.confirm(`Permanently delete backup ${id} (${snapshotDate(record)})?\nThis cannot be undone. Its saved files and restore capability will be lost. Your current library files will not change.`)) return;
+    maintenance.checked = false;
+    run("delete-snapshot", { snapshot_id: id, confirmed: true });
+  });
   function editFolders() {
     choosingFolders = true;
     invalidatePlan();

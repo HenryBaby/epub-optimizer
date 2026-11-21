@@ -109,7 +109,7 @@ it is not provided or implied by a library-folder restore.
 The optimizer must not attempt to pause, restart, inspect, or reconfigure host
 containers. No live integration or library mutation is part of development tests.
 
-Connect and select libraries, then use **Pause watching selected libraries** in
+Connect and select libraries, then use **Pause watching** in
 EPUB Optimizer before previewing. This needs no local mount or preview. Review
 the persisted receipt: each library shows paused watching, already disabled
 watching, or an unverified/failed update. Retry the same selection explicitly to
@@ -118,9 +118,8 @@ scans, metadata writes, and external writers can still run. Wait for queued work
 and pause other writers, including EPUB Optimizer watched Automation separately
 if it feeds Bookdrop. Its global automation setting is outside these API writes.
 
-Then map mounted paths, **Preview selected folders**, confirm external writers
-are paused, **Back up & optimize**, review results, and explicitly **Resume previous
-watching states**. Apply the same writer precautions before restore. The watching
+Then map mounted paths, **Preview folders**, confirm external writers
+are paused, **Back up & optimize**, review results, and explicitly **Resume watching**. Apply the same writer precautions before restore. The watching
 receipt survives restarts, and watching remains paused after completion until
 explicit resume. Reconnect to the same instance to recover it after restart.
 Resume restores originally enabled watching only; originally disabled libraries
@@ -135,11 +134,33 @@ Pausing invalidates any prior preview; refresh and preview again before starting
 Folder selections and unsaved local mappings survive a watching-status rerender.
 These controls do not provide complete Grimmory maintenance or database backup.
 
+## Local backup management
+
+The **Backups** view lists local snapshots, including while disconnected. Select
+one to review its timestamp, identity, counts, size, and mapped folder scope.
+**Restore snapshot** requires a same-instance connection, a fresh writer
+acknowledgement and a scope-specific confirmation. Selecting another snapshot or
+changing views clears that acknowledgement.
+
+**Delete backup** requires a separate irreversible confirmation with the selected
+snapshot ID and date. `POST /grimmory/delete-snapshot` accepts
+`{"snapshot_id": "saved-snapshot-id", "confirmed": true}` and returns full status.
+It deletes the selected local backup without touching current library files or
+requiring a Grimmory connection. No deletion starts from page loading, status
+polling, view changes, or selection. Active jobs and pending temporary watching
+recovery block deletion. A failed or interrupted deletion retains a `deleting`
+entry for explicit **Retry deletion**, with restore disabled; errors must never
+be presented as successful deletion. Removing a backup also removes its future
+restore capability and may make associated reader-sync refresh unavailable.
+
 ## Interface and verification
 
-Show connection status, path mappings, preview, explicit backup/run actions,
-per-book results, cancellation between books, retained backups, and explicit
-restore actions. Distinguish a library-files backup from a complete Grimmory
+Use the shared application width with compact **Optimize**, **Backups**, and
+**History** navigation. Keep watching status and controls together. Optimize shows
+only the current workflow stage and one contextual writer acknowledgement; Reader
+sync retains its separate fresh acknowledgement. Collapse connected settings,
+show per-book results and cancellation between books, and keep backups separate
+from run history. Distinguish a library-files backup from a complete Grimmory
 snapshot in both labels and reports.
 
 If a job fails before processing any books, inspect its message in the Grimmory

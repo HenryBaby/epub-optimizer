@@ -31,6 +31,17 @@ Focused validation selector: `node tests/ui/grimmory-workspace.cjs`, with the
 matching Playwright dependency supplied through `NODE_PATH` (the runner does this).
 The sequential checks cover:
 
+- Desktop and 390 px mobile shell/panel widths match the other application tabs.
+  Local Optimize / Backups / History navigation performs no writes, shows only
+  its own workflow, clears writer acknowledgement across contexts, and keeps a
+  single pair of watching controls beside their status.
+- Offline snapshot deletion requires an explicit selection and irreversible
+  identity/date confirmation. Cancel sends no request; confirm removes only the
+  selected backup and clears its details. Active operations and temporary
+  watching recovery disable deletion and guard synthetic clicks. An incomplete
+  deletion offers an explicit retry while restoration remains disabled. A failed
+  deletion shows its server error and pending state before the explicit retry.
+
 - Reader sync requires a fresh writer acknowledgement and KOReader/KOSync
   credentials, submits the saved optimization job rather than a newer sync job,
   clears the password and does not store credentials. Polling remains read only;
@@ -47,8 +58,8 @@ The sequential checks cover:
 - Explicitly pause selected libraries, preview the exact draft scope, acknowledge
   maintenance, and start. Connection/folder inputs lock while Cancel safely stays
   available. Real status polling preserves selected folders, draft mounts, open
-  per-file errors, expanded history and keyboard focus. Completion leaves watching
-  paused. History exposes verified backups; restore requires a fresh maintenance
+  per-file errors, the selected History view and keyboard focus. Completion leaves watching
+  paused. The Backups view exposes verified backups; restore requires a fresh maintenance
   acknowledgement and a snapshot-specific confirmation. Dismissing it issues no
   restore. Accepting it starts restore; cancellation and resume are explicit.
 - A partial pause explains permission failure. Its persisted receipt remains
@@ -71,6 +82,7 @@ backend watch-state persistence and preservation are separately covered by
 Each passing check prints a JSON line. `checks.json` records the passed checks and
 failure stack when applicable. Successful runs save `desktop-disconnected.png`,
 `desktop-connected-light.png`, `desktop-paused-light.png`, `desktop-active.png`, `desktop-result.png`, and
-`mobile-connected-dark.png`, and `reader-sync.png` under the chosen artifact directory. Browser console
+`mobile-connected-dark.png`, `mobile-optimize-dark.png`,
+`desktop-backup-dropdown.png`, `desktop-backup-delete-retry.png`, and `reader-sync.png` under the chosen artifact directory. Browser console
 errors and unhandled JavaScript errors fail each check. Screenshots are review
 artifacts, not pixel baselines.

@@ -1491,12 +1491,127 @@ class GrimmoryManager:
     SYNC_REFRESH_TIMEOUT = 60
     SYNC_REFRESH_INTERVAL = 5
 
+    def _save_snapshot_deletion(self, snapshot):
+        try:
+            self._save()
+        except Exception:
+            # A write can fail after atomic replacement (for example, during fsync).
+            # Reconcile under the process lock rather than guessing whether it committed.
+            self._state["snapshots"][snapshot["snapshot_id"]] = snapshot
+            with self._status_lock:
+                self._public_state = self._capture_status()
+            conservative_state = self._state
+            try:
+                data = _safe(self.state_dir / "state.json").read_bytes()
+                self._state = json.loads(data)
+                public_state = self._capture_status()
+                self._state_digest = hashlib.sha256(data).hexdigest()
+                with self._status_lock:
+                    self._public_state = public_state
+            except Exception:
+                # The in-memory deleting intent still prevents unsafe restore. A stale
+                # digest blocks later writes if the persisted state cannot be inspected.
+                self._state = conservative_state
+                self._state_digest = "unverified-deletion-state"
+            raise
+
+    async def delete_snapshot(self, payload):
+        async with self._lock:
+            self._idle()
+            if payload.get("confirmed") is not True:
+                raise GrimmoryValidationError("Confirm permanent snapshot deletion first.")
+            snapshot_id = payload.get("snapshot_id")
+            if (
+                not isinstance(snapshot_id, str)
+                or len(snapshot_id) != 32
+                or any(c not in "0123456789abcdef" for c in snapshot_id)
+            ):
+                raise GrimmoryValidationError("Invalid snapshot ID.")
+            self._acquire_process_lock()
+            try:
+                # A stale worker must fail before any backup bytes are removed.
+                state_path = self.state_dir / "state.json"
+                actual_digest = _digest(_safe(state_path)) if state_path.exists() else None
+                if actual_digest != self._state_digest:
+                    raise GrimmoryConflictError(
+                        "State changed in another worker; restart this worker before maintenance."
+                    )
+                snapshot = self._state["snapshots"].get(snapshot_id)
+                if not snapshot:
+                    raise GrimmoryValidationError("Unknown snapshot.")
+                if snapshot.get("snapshot_id") != snapshot_id:
+                    raise GrimmoryValidationError("Snapshot identity changed.")
+                for job in self._state["jobs"]:
+                    if job.get("snapshot_id") == snapshot_id and (
+                        job.get("status") in {"running", "backing_up", "restoring"}
+                        or any(r.get("status") == "pending" for r in job.get("results", []))
+                    ):
+                        raise GrimmoryConflictError("Recover pending snapshot operations first.")
+                backup_root = _safe(self.backup_dir)
+                target = _safe(backup_root / snapshot_id, exists=False)
+                protected = [self.state_dir, *self.allowed_roots, *self.excluded_paths]
+                protected.extend(
+                    m["local_path"]
+                    for m in [*self._state.get("mappings", []), *snapshot["plan"]["mappings"]]
+                )
+                if any(_overlap(target, _safe(p, exists=False)) for p in protected):
+                    raise GrimmoryValidationError("Snapshot overlaps a protected library path.")
+                deleting = snapshot.get("status") == "deleting"
+                if target.exists():
+                    info = target.lstat()
+                    identity = [info.st_dev, info.st_ino]
+                    if deleting and snapshot.get("deletion_identity") != identity:
+                        raise GrimmoryValidationError("Snapshot deletion directory changed.")
+                    # Validate every descendant before recursive removal. rmtree itself is
+                    # symlink-attack resistant on supported platforms and never follows links.
+                    if not shutil.rmtree.avoids_symlink_attacks:
+                        raise GrimmoryValidationError("Safe snapshot removal is unavailable.")
+                    _manifest(target, hash_files=False)
+                    if not deleting:
+                        saved = json.loads(_safe(target / "manifest.json").read_text())
+                        if saved != snapshot:
+                            raise GrimmoryValidationError("Snapshot manifest changed.")
+                elif not deleting:
+                    raise GrimmoryValidationError("Selected snapshot directory does not exist.")
+                if not deleting:
+                    # Persist intent before irreversible removal. An interrupted/partially
+                    # removed snapshot stays visible for explicit retry, never for restore.
+                    snapshot["status"] = "deleting"
+                    snapshot["deletion_identity"] = identity
+                    self._save_snapshot_deletion(snapshot)
+                if target.exists():
+                    removal = asyncio.create_task(asyncio.to_thread(shutil.rmtree, target))
+                    try:
+                        await asyncio.shield(removal)
+                    except asyncio.CancelledError:
+                        # Cancellation cannot release the process lock while disk work runs.
+                        while not removal.done():
+                            try:
+                                await asyncio.shield(removal)
+                            except asyncio.CancelledError:
+                                continue
+                            except Exception:
+                                break
+                        if not removal.cancelled():
+                            removal.exception()
+                        raise
+                # Retry after cancellation/crash may find the directory already gone.
+                # Its disappearance must still be durable before forgetting the intent.
+                _fsync_dir(backup_root)
+                del self._state["snapshots"][snapshot_id]
+                self._save_snapshot_deletion(snapshot)
+                return self.status()
+            finally:
+                self._release_process_lock()
+
     async def restore(self, payload):
         async with self._lock:
             self._confirm(payload)
             snapshot = self._state["snapshots"].get(payload.get("snapshot_id"))
             if not snapshot:
                 raise GrimmoryValidationError("Unknown snapshot.")
+            if snapshot.get("status") == "deleting":
+                raise GrimmoryValidationError("Snapshot deletion is pending; retry deletion.")
             if snapshot["plan"]["base_url"] != self._state["base_url"]:
                 raise GrimmoryValidationError(
                     "Connect to the snapshot Grimmory instance before restoring."

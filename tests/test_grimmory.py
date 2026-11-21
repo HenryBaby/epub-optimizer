@@ -536,3 +536,379 @@ def test_known_failure_diagnostics_redact_token(setup_library):
     assert manager._failure_message(
         grimmory.GrimmoryValidationError("Cannot continue: secret-token"), "fallback"
     ) == "Cannot continue: [redacted]"
+
+
+@pytest.fixture
+def saved_snapshot(setup_library):
+    manager, root, mapping, _, calls = setup_library
+    asyncio.run(optimize_all(manager, mapping))
+    snapshot_id = manager.status()["snapshots"][0]["snapshot_id"]
+    return manager, root, snapshot_id, calls
+
+
+def test_delete_snapshot_offline_removes_only_selected_backup(saved_snapshot):
+    manager, root, snapshot_id, calls = saved_snapshot
+    before = grimmory._manifest(root)
+    other = manager.backup_dir / ("f" * 32)
+    other.mkdir()
+    (other / "keep").write_bytes(b"unrelated backup")
+    fresh = grimmory.GrimmoryManager(
+        state_dir=manager.state_dir, backup_dir=manager.backup_dir, allowed_roots=[]
+    )
+    calls.clear()
+    result = asyncio.run(fresh.delete_snapshot(dict(snapshot_id=snapshot_id, confirmed=True)))
+    assert result["snapshots"] == []
+    assert not (manager.backup_dir / snapshot_id).exists()
+    assert (other / "keep").read_bytes() == b"unrelated backup"
+    assert grimmory._manifest(root) == before
+    assert calls == []
+    assert json.loads((manager.state_dir / "state.json").read_text())["snapshots"] == {}
+    assert fresh._process_lock is None
+
+
+@pytest.mark.parametrize("confirmed", [None, False, 1, "true"])
+def test_delete_snapshot_requires_explicit_confirmation(saved_snapshot, confirmed):
+    manager, _, snapshot_id, _ = saved_snapshot
+    with pytest.raises(grimmory.GrimmoryValidationError, match="Confirm"):
+        asyncio.run(manager.delete_snapshot(dict(snapshot_id=snapshot_id, confirmed=confirmed)))
+    assert (manager.backup_dir / snapshot_id / "manifest.json").exists()
+    assert manager.status()["snapshots"][0]["status"] == "ready"
+
+
+@pytest.mark.parametrize(
+    "snapshot_id", [None, [], {}, "", ".", "..", "../library", "/tmp", "a" * 32]
+)
+def test_delete_snapshot_rejects_invalid_or_unknown_ids(saved_snapshot, snapshot_id):
+    manager, root, valid_id, _ = saved_snapshot
+    before = grimmory._manifest(root)
+    with pytest.raises(grimmory.GrimmoryValidationError):
+        asyncio.run(manager.delete_snapshot(dict(snapshot_id=snapshot_id, confirmed=True)))
+    assert (manager.backup_dir / valid_id / "manifest.json").exists()
+    assert grimmory._manifest(root) == before
+
+
+@pytest.mark.parametrize("kind", ["identity", "manifest", "directory", "descendant", "parent"])
+def test_delete_snapshot_rejects_tampering_and_symlinks(saved_snapshot, kind):
+    manager, root, snapshot_id, _ = saved_snapshot
+    target = manager.backup_dir / snapshot_id
+    if kind == "identity":
+        manager._state["snapshots"][snapshot_id]["snapshot_id"] = "../library"
+        manager._save()
+    elif kind == "manifest":
+        (target / "manifest.json").write_text("{}")
+    elif kind == "descendant":
+        (target / "escape").symlink_to(root, target_is_directory=True)
+    elif kind == "directory":
+        target.rename(target.with_name("saved"))
+        target.symlink_to(root, target_is_directory=True)
+    else:
+        manager.backup_dir.rename(manager.backup_dir.with_name("saved-backups"))
+        manager.backup_dir.symlink_to(root, target_is_directory=True)
+    before = grimmory._manifest(root)
+    with pytest.raises(grimmory.GrimmoryValidationError):
+        asyncio.run(manager.delete_snapshot(dict(snapshot_id=snapshot_id, confirmed=True)))
+    assert grimmory._manifest(root) == before
+    assert manager.status()["snapshots"][0]["status"] == "ready"
+
+
+def test_delete_snapshot_rejects_backup_path_overlapping_source(saved_snapshot):
+    manager, root, snapshot_id, _ = saved_snapshot
+    manager.backup_dir = root
+    (root / snapshot_id).mkdir()
+    before = grimmory._manifest(root)
+    with pytest.raises(grimmory.GrimmoryValidationError):
+        asyncio.run(manager.delete_snapshot(dict(snapshot_id=snapshot_id, confirmed=True)))
+    assert grimmory._manifest(root) == before
+
+
+@pytest.mark.parametrize("kind", ["active", "journal", "watching"])
+def test_delete_snapshot_blocks_unfinished_recovery(saved_snapshot, kind):
+    manager, _, snapshot_id, _ = saved_snapshot
+    job = manager._state["jobs"][-1]
+    if kind == "active":
+        job["status"] = "restoring"
+    elif kind == "journal":
+        job["status"] = "interrupted"
+        job["results"][0]["status"] = "pending"
+    else:
+        job["watching_recovery"] = dict(status="pending", base_url="http://grimmory:6060")
+    manager._save()
+    with pytest.raises(grimmory.GrimmoryConflictError):
+        asyncio.run(manager.delete_snapshot(dict(snapshot_id=snapshot_id, confirmed=True)))
+    assert (manager.backup_dir / snapshot_id / "manifest.json").exists()
+
+
+def test_delete_snapshot_blocks_active_task(saved_snapshot):
+    manager, _, snapshot_id, _ = saved_snapshot
+
+    async def scenario():
+        manager._task = asyncio.create_task(asyncio.sleep(30))
+        try:
+            with pytest.raises(grimmory.GrimmoryConflictError):
+                await manager.delete_snapshot(dict(snapshot_id=snapshot_id, confirmed=True))
+        finally:
+            manager._task.cancel()
+            await asyncio.gather(manager._task, return_exceptions=True)
+
+    asyncio.run(scenario())
+    assert (manager.backup_dir / snapshot_id / "manifest.json").exists()
+
+
+@pytest.mark.parametrize("kind", ["locked", "stale"])
+def test_delete_snapshot_checks_process_lock_and_digest_before_removal(saved_snapshot, kind):
+    manager, root, snapshot_id, _ = saved_snapshot
+    other = grimmory.GrimmoryManager(
+        state_dir=manager.state_dir, backup_dir=manager.backup_dir, allowed_roots=[root]
+    )
+    if kind == "locked":
+        other._acquire_process_lock()
+    else:
+        other._state["base_url"] = "http://changed:6060"
+        other._save()
+    stored = (manager.state_dir / "state.json").read_bytes()
+    try:
+        with pytest.raises(grimmory.GrimmoryConflictError):
+            asyncio.run(manager.delete_snapshot(dict(snapshot_id=snapshot_id, confirmed=True)))
+    finally:
+        other._release_process_lock()
+    assert (manager.state_dir / "state.json").read_bytes() == stored
+    assert (manager.backup_dir / snapshot_id / "manifest.json").exists()
+
+
+@pytest.mark.parametrize("stage", ["intent", "removal", "partial", "registry"])
+def test_delete_snapshot_failure_is_safe_and_retryable(saved_snapshot, monkeypatch, stage):
+    manager, root, snapshot_id, calls = saved_snapshot
+    before = grimmory._manifest(root)
+    target = manager.backup_dir / snapshot_id
+    real_save, real_remove = manager._save, grimmory.shutil.rmtree
+    saves = 0
+
+    def save():
+        nonlocal saves
+        saves += 1
+        if saves == (2 if stage == "registry" else 1):
+            raise OSError(errno.ENOSPC, "private filesystem path")
+        real_save()
+
+    def remove(path):
+        if stage == "partial":
+            (path / "0/Author/Book.epub").unlink()
+        raise OSError(errno.EACCES, "private filesystem path")
+
+    if stage in {"intent", "registry"}:
+        monkeypatch.setattr(manager, "_save", save)
+    else:
+        monkeypatch.setattr(grimmory.shutil, "rmtree", remove)
+        remove.avoids_symlink_attacks = True
+    with pytest.raises(OSError):
+        asyncio.run(manager.delete_snapshot(dict(snapshot_id=snapshot_id, confirmed=True)))
+    assert grimmory._manifest(root) == before
+    assert snapshot_id in manager._state["snapshots"]
+    assert manager._process_lock is None
+    stored = json.loads((manager.state_dir / "state.json").read_text())["snapshots"][snapshot_id]
+    assert stored["status"] == ("ready" if stage == "intent" else "deleting")
+    if stage != "intent":
+        with pytest.raises(grimmory.GrimmoryValidationError, match="deletion is pending"):
+            asyncio.run(manager.restore(dict(snapshot_id=snapshot_id, maintenance_confirmed=True)))
+    else:
+        assert (target / "manifest.json").exists()
+    monkeypatch.setattr(grimmory.shutil, "rmtree", real_remove)
+    recovered = grimmory.GrimmoryManager(
+        state_dir=manager.state_dir, backup_dir=manager.backup_dir, allowed_roots=[]
+    )
+    calls.clear()
+    asyncio.run(recovered.delete_snapshot(dict(snapshot_id=snapshot_id, confirmed=True)))
+    assert not target.exists()
+    assert recovered.status()["snapshots"] == []
+    assert calls == []
+
+
+def test_delete_snapshot_serializes_requests_and_holds_process_lock(saved_snapshot, monkeypatch):
+    manager, root, snapshot_id, _ = saved_snapshot
+    other = grimmory.GrimmoryManager(
+        state_dir=manager.state_dir, backup_dir=manager.backup_dir, allowed_roots=[root]
+    )
+    entered, release = threading.Event(), threading.Event()
+    real_remove = grimmory.shutil.rmtree
+
+    def remove(path):
+        entered.set()
+        assert release.wait(5)
+        real_remove(path)
+
+    remove.avoids_symlink_attacks = True
+    monkeypatch.setattr(grimmory.shutil, "rmtree", remove)
+
+    async def scenario():
+        first = asyncio.create_task(
+            manager.delete_snapshot(dict(snapshot_id=snapshot_id, confirmed=True))
+        )
+        try:
+            assert await asyncio.to_thread(entered.wait, 5)
+            with pytest.raises(grimmory.GrimmoryConflictError, match="process"):
+                await other.delete_snapshot(dict(snapshot_id=snapshot_id, confirmed=True))
+            second = asyncio.create_task(
+                manager.delete_snapshot(dict(snapshot_id=snapshot_id, confirmed=True))
+            )
+            await asyncio.sleep(0)
+            assert not second.done()
+        finally:
+            release.set()
+        await first
+        with pytest.raises(grimmory.GrimmoryValidationError, match="Unknown snapshot"):
+            await second
+
+    asyncio.run(scenario())
+    assert manager.status()["snapshots"] == []
+
+
+def test_delete_snapshot_allows_interrupted_job_without_pending_recovery(saved_snapshot):
+    manager, _, snapshot_id, _ = saved_snapshot
+    manager._state["jobs"][-1]["status"] = "interrupted"
+    manager._save()
+    asyncio.run(manager.delete_snapshot(dict(snapshot_id=snapshot_id, confirmed=True)))
+    assert manager.status()["snapshots"] == []
+
+
+def test_delete_snapshot_retry_rejects_replaced_directory(saved_snapshot, monkeypatch):
+    manager, _, snapshot_id, _ = saved_snapshot
+    target = manager.backup_dir / snapshot_id
+    real_remove = grimmory.shutil.rmtree
+
+    def remove(path):
+        raise OSError(errno.EACCES, "denied")
+
+    remove.avoids_symlink_attacks = True
+    monkeypatch.setattr(grimmory.shutil, "rmtree", remove)
+    with pytest.raises(OSError):
+        asyncio.run(manager.delete_snapshot(dict(snapshot_id=snapshot_id, confirmed=True)))
+    target.rename(target.with_name("retained-original"))
+    target.mkdir()
+    (target / "keep").write_bytes(b"replacement data")
+    monkeypatch.setattr(grimmory.shutil, "rmtree", real_remove)
+    with pytest.raises(grimmory.GrimmoryValidationError, match="directory changed"):
+        asyncio.run(manager.delete_snapshot(dict(snapshot_id=snapshot_id, confirmed=True)))
+    assert (target / "keep").read_bytes() == b"replacement data"
+
+
+def test_delete_snapshot_cancellation_holds_lock_until_removal_stops(saved_snapshot, monkeypatch):
+    manager, _, snapshot_id, _ = saved_snapshot
+    entered, release = threading.Event(), threading.Event()
+    real_remove = grimmory.shutil.rmtree
+
+    def remove(path):
+        entered.set()
+        assert release.wait(5)
+        real_remove(path)
+
+    remove.avoids_symlink_attacks = True
+    monkeypatch.setattr(grimmory.shutil, "rmtree", remove)
+
+    async def scenario():
+        deletion = asyncio.create_task(
+            manager.delete_snapshot(dict(snapshot_id=snapshot_id, confirmed=True))
+        )
+        try:
+            assert await asyncio.to_thread(entered.wait, 5)
+            deletion.cancel()
+            await asyncio.sleep(0)
+            assert manager._process_lock is not None
+            assert manager._lock.locked()
+            deletion.cancel()
+            await asyncio.sleep(0)
+            assert manager._process_lock is not None
+            assert manager._lock.locked()
+        finally:
+            release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await deletion
+        assert manager._process_lock is None
+        assert manager.status()["snapshots"][0]["status"] == "deleting"
+        await manager.delete_snapshot(dict(snapshot_id=snapshot_id, confirmed=True))
+
+    asyncio.run(scenario())
+    assert manager.status()["snapshots"] == []
+
+
+@pytest.mark.parametrize("stage", ["intent", "registry"])
+def test_delete_snapshot_reconciles_state_after_replacement_failure(
+    saved_snapshot, monkeypatch, stage
+):
+    manager, root, snapshot_id, _ = saved_snapshot
+    before = grimmory._manifest(root)
+    real_write = grimmory._json_write
+    writes = 0
+
+    def write(path, data):
+        nonlocal writes
+        writes += 1
+        real_write(path, data)
+        if writes == (1 if stage == "intent" else 2):
+            raise OSError(errno.EIO, "sync failure after replacement")
+
+    monkeypatch.setattr(grimmory, "_json_write", write)
+    with pytest.raises(OSError):
+        asyncio.run(manager.delete_snapshot(dict(snapshot_id=snapshot_id, confirmed=True)))
+    persisted = json.loads((manager.state_dir / "state.json").read_text())
+    assert manager._state == persisted
+    assert manager._state_digest == grimmory._digest(manager.state_dir / "state.json")
+    assert grimmory._manifest(root) == before
+    if stage == "intent":
+        assert manager.status()["snapshots"][0]["status"] == "deleting"
+        assert (manager.backup_dir / snapshot_id / "manifest.json").exists()
+        asyncio.run(manager.delete_snapshot(dict(snapshot_id=snapshot_id, confirmed=True)))
+    assert manager.status()["snapshots"] == []
+    assert not (manager.backup_dir / snapshot_id).exists()
+
+
+def test_delete_snapshot_missing_directory_retry_syncs_backup_before_registry(
+    saved_snapshot, monkeypatch
+):
+    manager, _, snapshot_id, _ = saved_snapshot
+    target = manager.backup_dir / snapshot_id
+    snapshot = manager._state["snapshots"][snapshot_id]
+    info = target.stat()
+    snapshot.update(status="deleting", deletion_identity=[info.st_dev, info.st_ino])
+    manager._save()
+    grimmory.shutil.rmtree(target)
+    events = []
+    real_sync, real_save = grimmory._fsync_dir, manager._save
+
+    def sync(path):
+        if path == manager.backup_dir:
+            events.append("sync backup")
+        real_sync(path)
+
+    def save():
+        events.append("save registry")
+        real_save()
+
+    monkeypatch.setattr(grimmory, "_fsync_dir", sync)
+    monkeypatch.setattr(manager, "_save", save)
+    asyncio.run(manager.delete_snapshot(dict(snapshot_id=snapshot_id, confirmed=True)))
+    assert events[:2] == ["sync backup", "save registry"]
+
+
+def test_delete_snapshot_unreadable_failed_save_requires_restart(saved_snapshot, monkeypatch):
+    manager, _, snapshot_id, _ = saved_snapshot
+    real_safe = grimmory._safe
+
+    def unreadable(path, **kwargs):
+        if path == manager.state_dir / "state.json":
+            raise OSError(errno.EACCES, "state temporarily unreadable")
+        return real_safe(path, **kwargs)
+
+    def save():
+        monkeypatch.setattr(grimmory, "_safe", unreadable)
+        raise OSError(errno.EIO, "write failed")
+
+    monkeypatch.setattr(manager, "_save", save)
+    with pytest.raises(OSError):
+        asyncio.run(manager.delete_snapshot(dict(snapshot_id=snapshot_id, confirmed=True)))
+    assert manager.status()["snapshots"][0]["status"] == "deleting"
+    assert (manager.backup_dir / snapshot_id / "manifest.json").exists()
+    monkeypatch.setattr(grimmory, "_safe", real_safe)
+    with pytest.raises(grimmory.GrimmoryConflictError, match="restart"):
+        asyncio.run(manager.delete_snapshot(dict(snapshot_id=snapshot_id, confirmed=True)))
+    with pytest.raises(grimmory.GrimmoryValidationError, match="deletion is pending"):
+        asyncio.run(manager.restore(dict(snapshot_id=snapshot_id, maintenance_confirmed=True)))

@@ -9,7 +9,7 @@ from epub_optimizer.grimmory import GrimmoryValidationError
 from epub_optimizer.web import app
 
 WATCH_ACTIONS = ["pause-watching", "resume-watching", "refresh-sync", "restore-sync-watching"]
-ACTIONS = ["connect", "preview", "start", "restore", "cancel", *WATCH_ACTIONS]
+ACTIONS = ["connect", "preview", "start", "restore", "delete-snapshot", "cancel", *WATCH_ACTIONS]
 
 
 def operation(manager, action):
@@ -45,8 +45,11 @@ def test_home_and_status_do_not_start_library_work(grimmory):
     assert 'id="grimmory-pause-watching"' in response.text
     assert 'id="grimmory-resume-watching"' in response.text
     assert "excludes the Grimmory database and application state" in response.text
-    assert 'aria-label="Maintenance progress"' in response.text
-    assert 'id="grimmory-past-activity"' in response.text
+    assert 'aria-label="Grimmory workspace"' in response.text
+    for view in ["optimize", "backups", "history"]:
+        assert f'data-grimmory-view="{view}"' in response.text
+    assert 'id="grimmory-history-view"' in response.text
+    assert 'id="grimmory-backups-view"' in response.text
     manager.status.assert_not_called()
     assert client.get("/grimmory").json()["connected"] is False
     for action in ACTIONS:
@@ -62,7 +65,7 @@ def test_grimmory_actions_are_post_only(grimmory, action):
 
 
 @pytest.mark.parametrize("body", ["{", "[]", "null", '"text"'])
-@pytest.mark.parametrize("action", ["start", *WATCH_ACTIONS])
+@pytest.mark.parametrize("action", ["start", "delete-snapshot", *WATCH_ACTIONS])
 def test_invalid_grimmory_json_is_rejected(grimmory, body, action):
     client, manager = grimmory
     response = client.post(f"/grimmory/{action}", content=body)
@@ -254,6 +257,7 @@ def test_cross_origin_grimmory_actions_rejected(grimmory, action, origin):
         ),
         ("start", {"plan_id": "plan-1", "maintenance_confirmed": True}),
         ("restore", {"snapshot_id": "snapshot-1", "maintenance_confirmed": True}),
+        ("delete-snapshot", {"snapshot_id": "a" * 32, "confirmed": True}),
         ("pause-watching", {"library_ids": [7, 8]}),
         ("resume-watching", {"session_id": "watch-session-1"}),
     ],
@@ -275,7 +279,7 @@ def test_cancel_has_no_implicit_start(grimmory):
     manager.start.assert_not_awaited()
 
 
-@pytest.mark.parametrize("action", ["connect", *WATCH_ACTIONS])
+@pytest.mark.parametrize("action", ["connect", "delete-snapshot", *WATCH_ACTIONS])
 @pytest.mark.parametrize("error,code", [(ValueError, 400), (RuntimeError, 409), (OSError, 502)])
 def test_grimmory_errors_never_echo_credentials(grimmory, action, error, code):
     client, manager = grimmory
@@ -286,7 +290,7 @@ def test_grimmory_errors_never_echo_credentials(grimmory, action, error, code):
     assert "remote server dump" not in response.text
 
 
-@pytest.mark.parametrize("action", ["connect", *WATCH_ACTIONS])
+@pytest.mark.parametrize("action", ["connect", "delete-snapshot", *WATCH_ACTIONS])
 def test_oversize_grimmory_request_rejected(grimmory, action):
     client, manager = grimmory
     response = client.post(f"/grimmory/{action}", json={"password": "x" * 65536})
@@ -294,7 +298,7 @@ def test_oversize_grimmory_request_rejected(grimmory, action):
     operation(manager, action).assert_not_awaited()
 
 
-@pytest.mark.parametrize("action", ["start", *WATCH_ACTIONS])
+@pytest.mark.parametrize("action", ["start", "delete-snapshot", *WATCH_ACTIONS])
 def test_safe_manager_validation_reason_is_visible(grimmory, action):
     client, manager = grimmory
     operation(manager, action).side_effect = GrimmoryValidationError(

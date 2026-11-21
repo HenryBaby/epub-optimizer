@@ -216,6 +216,11 @@ async def grimmory_restore(request: Request) -> JSONResponse:
     return await _grimmory_action(request, "restore")
 
 
+@app.post("/grimmory/delete-snapshot")
+async def grimmory_delete_snapshot(request: Request) -> JSONResponse:
+    return await _grimmory_action(request, "delete-snapshot")
+
+
 @app.post("/grimmory/pause-watching")
 async def grimmory_pause_watching(request: Request) -> JSONResponse:
     return await _grimmory_action(request, "pause-watching")
