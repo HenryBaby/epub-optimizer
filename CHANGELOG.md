@@ -3,7 +3,7 @@
 > Release dates below are the dates of the tagged commits. These historical
 > entries were backfilled; they do not establish exact publication times.
 
-## Unreleased
+## 1.4.0 - 2026-11-21
 
 ### Added
 
