@@ -8,8 +8,7 @@ from fastapi.testclient import TestClient
 from epub_optimizer.grimmory import GrimmoryValidationError
 from epub_optimizer.web import app
 
-
-WATCH_ACTIONS = ["pause-watching", "resume-watching"]
+WATCH_ACTIONS = ["pause-watching", "resume-watching", "refresh-sync", "restore-sync-watching"]
 ACTIONS = ["connect", "preview", "start", "restore", "cancel", *WATCH_ACTIONS]
 
 
@@ -298,7 +297,9 @@ def test_oversize_grimmory_request_rejected(grimmory, action):
 @pytest.mark.parametrize("action", ["start", *WATCH_ACTIONS])
 def test_safe_manager_validation_reason_is_visible(grimmory, action):
     client, manager = grimmory
-    operation(manager, action).side_effect = GrimmoryValidationError("Disable Grimmory library watching first.")
+    operation(manager, action).side_effect = GrimmoryValidationError(
+        "Disable Grimmory library watching first."
+    )
     response = client.post(f"/grimmory/{action}", json={"plan_id": "preview"})
     assert response.status_code == 400
     assert response.json()["detail"] == "Disable Grimmory library watching first."
@@ -308,9 +309,18 @@ def test_safe_manager_validation_reason_is_visible(grimmory, action):
 def test_watching_actions_return_saved_receipt_without_starting_jobs(grimmory, action):
     client, manager = grimmory
     receipt = {
-        "session_id": "saved-session", "base_url": "http://grimmory:6060", "status": "partial",
-        "libraries": [{"library_id": 7, "name": "Books", "original_watch": True,
-                       "status": "pause_pending", "error": "Watcher request failed; retry explicitly."}],
+        "session_id": "saved-session",
+        "base_url": "http://grimmory:6060",
+        "status": "partial",
+        "libraries": [
+            {
+                "library_id": 7,
+                "name": "Books",
+                "original_watch": True,
+                "status": "pause_pending",
+                "error": "Watcher request failed; retry explicitly.",
+            }
+        ],
     }
     operation(manager, action).return_value = {"connected": True, "watcher_maintenance": receipt}
     response = client.post(f"/grimmory/{action}", json={"session_id": "saved-session"})

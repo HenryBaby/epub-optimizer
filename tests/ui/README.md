@@ -29,7 +29,16 @@ library filesystem, credentials or other homelab services are contacted.
 
 Focused validation selector: `node tests/ui/grimmory-workspace.cjs`, with the
 matching Playwright dependency supplied through `NODE_PATH` (the runner does this).
-The five sequential checks cover:
+The sequential checks cover:
+
+- Reader sync requires a fresh writer acknowledgement and KOReader/KOSync
+  credentials, submits the saved optimization job rather than a newer sync job,
+  clears the password and does not store credentials. Polling remains read only;
+  active controls lock while cancellation stays available. Results distinguish
+  verified, skipped and failed files, and preserve the original pause receipt.
+- Interrupted temporary watching recovery remains visible across reload and
+  disconnected reconnect, blocks other writing actions, and requires an explicit
+  same-instance restore. Authentication errors remain visible without retries.
 
 - Loading, reloading and changing global tabs issue no action POSTs. The upload
   picker is hidden in the Grimmory workspace. Connect discovers folders; selecting
@@ -62,6 +71,6 @@ backend watch-state persistence and preservation are separately covered by
 Each passing check prints a JSON line. `checks.json` records the passed checks and
 failure stack when applicable. Successful runs save `desktop-disconnected.png`,
 `desktop-connected-light.png`, `desktop-paused-light.png`, `desktop-active.png`, `desktop-result.png`, and
-`mobile-connected-dark.png` under the chosen artifact directory. Browser console
+`mobile-connected-dark.png`, and `reader-sync.png` under the chosen artifact directory. Browser console
 errors and unhandled JavaScript errors fail each check. Screenshots are review
 artifacts, not pixel baselines.

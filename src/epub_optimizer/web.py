@@ -167,7 +167,7 @@ async def _grimmory_action(request: Request, action: str) -> JSONResponse:
         raise HTTPException(status_code=400, detail="Grimmory request must be an object.")
     try:
         manager = _grimmory_manager()
-        method = {"pause-watching": "pause_watching", "resume-watching": "resume_watching"}.get(action, action)
+        method = action.replace("-", "_")
         operation = getattr(manager, method)
         result = await operation() if action == "cancel" else await operation(payload)
     except ValueError as exc:
@@ -224,6 +224,16 @@ async def grimmory_pause_watching(request: Request) -> JSONResponse:
 @app.post("/grimmory/resume-watching")
 async def grimmory_resume_watching(request: Request) -> JSONResponse:
     return await _grimmory_action(request, "resume-watching")
+
+
+@app.post("/grimmory/refresh-sync")
+async def grimmory_refresh_sync(request: Request) -> JSONResponse:
+    return await _grimmory_action(request, "refresh-sync")
+
+
+@app.post("/grimmory/restore-sync-watching")
+async def grimmory_restore_sync_watching(request: Request) -> JSONResponse:
+    return await _grimmory_action(request, "restore-sync-watching")
 
 
 @app.get("/health")

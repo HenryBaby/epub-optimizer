@@ -3,6 +3,14 @@
 > Release dates below are the dates of the tagged commits. These historical
 > entries were backfilled; they do not establish exact publication times.
 
+## Unreleased
+
+### Added
+
+- Add an explicit post-optimization reader-sync fingerprint refresh for indexed
+  Grimmory EPUBs, with read-only KOSync verification, identical-byte publication,
+  temporary watching recovery and a separate writer acknowledgement.
+
 ## 1.3.1 - 2026-11-20
 
 ### Fixed

@@ -1239,6 +1239,7 @@ function downloadJson(filename, value) {
   let choosingFolders = false;
   let busyAction = "";
   let selectedSnapshotId = "";
+  let syncSourceId = "";
   const renderSignatures = new Map();
 
   function message(text, error = false) {
@@ -1283,11 +1284,21 @@ function downloadJson(filename, value) {
   function active() {
     const job = currentJob() || {};
     return state.running === true || Boolean(state.active_job) || state.active === true || job.active === true ||
-      ["backing_up", "backup", "optimizing", "restoring", "running", "cancelling"].includes(job.phase || job.status);
+      ["backing_up", "backup", "optimizing", "restoring", "refreshing_sync", "running", "cancelling"].includes(job.phase || job.status);
+  }
+
+  function syncSource() {
+    const jobs = [...(state.history || state.jobs || []), currentJob()].filter(Boolean);
+    return jobs.filter((job) => job.kind === "optimize" && job.snapshot_id &&
+      ["completed", "cancelled", "failed", "interrupted"].includes(job.status) &&
+      job.results?.some((result) => result.status === "optimized"))
+      .sort((left, right) => (right.created_at || 0) - (left.created_at || 0))[0];
   }
 
   function updateControls() {
     const locked = busy || active();
+    const recovery = state.sync_watching_recovery;
+    const writingLocked = locked || Boolean(recovery);
     connectForm.querySelectorAll("input, button").forEach((node) => { node.disabled = locked; });
     mappingList.querySelectorAll("input").forEach((node) => { node.disabled = locked; });
     maintenance.disabled = locked;
@@ -1297,14 +1308,27 @@ function downloadJson(filename, value) {
     const selectedIds = selectedLibraryIds();
     const sameSelection = pendingReceipt && receipt.base_url === state.base_url &&
       receipt.libraries.length === selectedIds.length && receipt.libraries.every((library) => selectedIds.includes(library.library_id));
-    find("pause-watching").disabled = locked || !state.connected || !selectedIds.length ||
+    find("pause-watching").disabled = writingLocked || !state.connected || !selectedIds.length ||
       (pendingReceipt && (!sameSelection || receipt.libraries.some((library) => ["resume_pending", "restored"].includes(library.status))));
-    find("resume-watching").disabled = locked || !state.connected || !pendingReceipt || receipt.base_url !== state.base_url;
-    find("start").disabled = locked || !plan?.plan_id || !maintenance.checked;
+    find("resume-watching").disabled = writingLocked || !state.connected || !pendingReceipt || receipt.base_url !== state.base_url;
+    find("start").disabled = writingLocked || !plan?.plan_id || !maintenance.checked;
     find("cancel").disabled = busy || !active();
     find("refresh").disabled = busy;
     find("snapshot-select").disabled = locked || !state.connected || !availableSnapshots().length;
-    find("restore").disabled = locked || !state.connected || !maintenance.checked || !restorableSnapshot();
+    find("restore").disabled = writingLocked || !state.connected || !maintenance.checked || !restorableSnapshot();
+    const source = syncSource();
+    const nextSourceId = source?.id || source?.job_id || "";
+    if (nextSourceId !== syncSourceId) {
+      find("sync-maintenance").checked = false;
+      find("kosync-password").value = "";
+      syncSourceId = nextSourceId;
+    }
+    find("reader-sync").hidden = !source;
+    find("sync-source").textContent = source ? `Optimization run · ${snapshotDate(source)} · ${source.results.filter((result) => result.status === "optimized").length} optimized books` : "";
+    find("sync-form").querySelectorAll("input").forEach((node) => { node.disabled = locked; });
+    find("refresh-sync").disabled = writingLocked || !state.connected || !source ||
+      !find("sync-maintenance").checked || !find("kosync-username").value.trim() || !find("kosync-password").value;
+    find("restore-sync-watching").disabled = locked || !recovery || !state.connected || recovery.base_url !== state.base_url;
     find("edit-folders").disabled = locked;
     find("new-run").disabled = locked;
     const selected = mappings.filter((row) => row.selected.checked).length;
@@ -1415,7 +1439,8 @@ function downloadJson(filename, value) {
     const pending = receipt.status !== "resumed";
     find("watching").classList.toggle("watching-pending", pending);
     find("resume-watching").hidden = !pending;
-    const heading = !pending ? "Previous watching states restored" : receipt.status === "paused" ? "Watching paused" : "Watching needs your attention";
+    const temporary = Boolean(state.sync_watching_recovery);
+    const heading = temporary ? "Saved optimization watching settings" : !pending ? "Previous watching states restored" : receipt.status === "paused" ? "Watching paused" : "Watching needs your attention";
     target.append(element("h3", heading));
     const list = element("ul");
     for (const library of receipt.libraries || []) {
@@ -1425,16 +1450,32 @@ function downloadJson(filename, value) {
         pause_pending: "Pause not yet verified", resume_pending: "Resume not yet verified", resumed: "Previous watching state restored",
         restored: "Previous watching state restored", pending: "Awaiting watching update",
       };
-      list.append(element("li", `${library.name || `Library ${library.library_id}`} — ${labels[library.status] || library.status}${library.error ? `: ${library.error}` : ""}`));
+      list.append(element("li", `${library.name || `Library ${library.library_id}`} — ${temporary ? "Saved pause session; temporary sync watching takes precedence" : labels[library.status] || library.status}${library.error ? `: ${library.error}` : ""}`));
     }
     if (receipt.libraries?.some((library) => library.error)) list.setAttribute("role", "alert");
     target.append(list);
     if (pending) {
-      target.append(element("p", "Watching stays paused after completion and restarts. Resume restores previous settings."));
+      target.append(element("p", temporary ? "Reader sync has a separate temporary watching session. Restore that session before resuming these saved settings." : "Watching stays paused after completion and restarts. Resume restores previous settings."));
       if (!state.connected || receipt.base_url !== state.base_url) {
         target.append(element("p", `Reconnect to ${receipt.base_url} to resume the saved previous watching states.`));
       }
     }
+  }
+
+  function renderSyncRecovery() {
+    const receipt = state.sync_watching_recovery;
+    find("sync-recovery").hidden = !receipt;
+    const target = find("sync-recovery-message");
+    target.replaceChildren();
+    if (!receipt) return;
+    target.append(element("h3", active() ? "Reader sync temporarily enables watching" : "Restore reader sync watching settings"));
+    target.append(element("p", active() ? "The refresh will restore the exact watching settings saved at its start. Recovery is available once it stops." : "Temporary watching has not been fully restored. Restore its saved settings before another library write."));
+    const list = element("ul");
+    for (const library of receipt.libraries || []) {
+      list.append(element("li", `${library.name || `Library ${library.library_id}`} — restore watching ${library.original_watch ? "on" : "off"}${library.error ? `: ${library.error}` : ""}`));
+    }
+    target.append(list);
+    if (!state.connected || receipt.base_url !== state.base_url) target.append(element("p", `Reconnect to ${receipt.base_url} to restore these settings. Reconnecting does not restore them automatically.`));
   }
 
   function renderPlan() {
@@ -1459,6 +1500,7 @@ function downloadJson(filename, value) {
     const results = job.results || [];
     const finished = results.filter((item) => ["optimized", "restored"].includes(item.status)).length;
     const failed = results.filter((item) => item.status === "failed").length;
+    const sync = job.kind === "sync_refresh";
     const phases = {
       backing_up: "Backing up and verifying library folders",
       running: "Optimizing EPUBs",
@@ -1468,8 +1510,10 @@ function downloadJson(filename, value) {
       failed: "Failed",
       interrupted: "Interrupted; review the snapshot before continuing",
     };
-    target.append(element("h3", job.status === "completed" && failed ? "Completed with issues" : phases[job.phase || job.status] || job.phase || job.status || "Idle"));
-    if (results.length) target.append(element("p", `${finished} completed · ${failed} failed`, failed ? "warnings" : undefined));
+    const syncHeading = job.status === "completed" ? (failed ? "Reader sync completed with issues" : "Reader sync updated. Resume watching when ready.") : job.status === "cancelled" ? "Reader sync cancelled" : job.status === "failed" || job.status === "interrupted" ? "Reader sync needs attention" : job.status === "cancelling" ? "Cancelling reader sync; restoring watching settings" : "Updating reader sync";
+    target.append(element("h3", sync ? syncHeading : job.status === "completed" && failed ? "Completed with issues" : phases[job.phase || job.status] || job.phase || job.status || "Idle"));
+    if (sync) target.append(element("p", `${results.filter((item) => item.status === "verified").length} verified · ${results.filter((item) => item.status === "skipped").length} skipped · ${failed} failed`, failed ? "warnings" : undefined));
+    else if (results.length) target.append(element("p", `${finished} completed · ${failed} failed`, failed ? "warnings" : undefined));
     if (active() && job === currentJob()) {
       const meter = element("div", undefined, "meter grimmory-meter");
       meter.setAttribute("role", "progressbar");
@@ -1595,7 +1639,8 @@ function downloadJson(filename, value) {
     find("connection-summary").textContent = state.connected ? `Connected · ${state.base_url || "Grimmory"}` : "Connect to Grimmory";
     if (state.connected && !wasConnected) find("connection").open = false;
     if (!state.connected) find("connection").open = true;
-    renderChanged("watcher-maintenance", [state.watcher_maintenance, state.connected, state.base_url], renderWatcherMaintenance);
+    renderChanged("watcher-maintenance", [state.watcher_maintenance, state.sync_watching_recovery, state.connected, state.base_url], renderWatcherMaintenance);
+    renderChanged("sync-recovery-message", [state.sync_watching_recovery, state.connected, state.base_url, active()], renderSyncRecovery);
     renderChanged("progress", [currentJob(), active()], (progress) => {
       progress.replaceChildren();
       if (currentJob()) renderJob(progress, currentJob());
@@ -1646,7 +1691,7 @@ function downloadJson(filename, value) {
         if (action === "connect") choosingFolders = true;
         invalidatePlan();
         maintenance.checked = false;
-      } else if (action === "start" || action === "restore") {
+      } else if (["start", "restore", "refresh-sync", "restore-sync-watching"].includes(action)) {
         choosingFolders = false;
         invalidatePlan();
         maintenance.checked = false;
@@ -1687,20 +1732,35 @@ function downloadJson(filename, value) {
   });
   find("pause-watching").addEventListener("click", () => {
     const libraryIds = selectedLibraryIds();
-    if (busy || active() || !state.connected || !libraryIds.length) return;
+    if (busy || active() || state.sync_watching_recovery || !state.connected || !libraryIds.length) return;
     invalidatePlan();
     maintenance.checked = false;
     run("pause-watching", { library_ids: libraryIds });
   });
   find("resume-watching").addEventListener("click", () => {
     const receipt = state.watcher_maintenance;
-    if (busy || active() || !state.connected || !receipt?.session_id || receipt.base_url !== state.base_url) return;
+    if (busy || active() || state.sync_watching_recovery || !state.connected || !receipt?.session_id || receipt.base_url !== state.base_url) return;
     invalidatePlan();
     maintenance.checked = false;
     run("resume-watching", { session_id: receipt.session_id });
   });
+  find("sync-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const source = syncSource();
+    if (find("refresh-sync").disabled || !source) return;
+    const payload = { job_id: source.id || source.job_id, kosync_username: find("kosync-username").value,
+      kosync_password: find("kosync-password").value, maintenance_confirmed: true };
+    find("kosync-password").value = "";
+    find("sync-maintenance").checked = false;
+    run("refresh-sync", payload);
+  });
+  find("sync-form").addEventListener("input", updateControls);
+  find("restore-sync-watching").addEventListener("click", () => {
+    if (find("restore-sync-watching").disabled) return;
+    run("restore-sync-watching", { job_id: state.sync_watching_recovery.job_id });
+  });
   find("start").addEventListener("click", () => {
-    if (!busy && !active() && plan?.plan_id && maintenance.checked) run("start", { plan_id: plan.plan_id, maintenance_confirmed: true });
+    if (!busy && !active() && !state.sync_watching_recovery && plan?.plan_id && maintenance.checked) run("start", { plan_id: plan.plan_id, maintenance_confirmed: true });
   });
   find("cancel").addEventListener("click", () => { if (!busy && active()) run("cancel", {}); });
   find("refresh").addEventListener("click", loadStatus);
@@ -1711,7 +1771,7 @@ function downloadJson(filename, value) {
     updateControls();
   });
   find("restore").addEventListener("click", () => {
-    if (busy || active() || !state.connected || !maintenance.checked) return;
+    if (busy || active() || state.sync_watching_recovery || !state.connected || !maintenance.checked) return;
     const record = restorableSnapshot();
     if (!record) return;
     const id = record.snapshot_id || record.id;

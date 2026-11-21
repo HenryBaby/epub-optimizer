@@ -31,6 +31,26 @@ existing behavior.
 
 ## Grimmory library maintenance
 
+After an optimization run, the optional **Reader sync** disclosure can refresh
+Grimmory's reader-sync fingerprint without optimizing the library again. It uses
+the latest saved optimization run with successful EPUB results, including runs
+saved before this feature was added. Enter your **KOReader/KOSync** credentials
+(the same sync account used by CrossPoint, separate from Grimmory's application
+login), confirm that other writers are paused, then explicitly click **Refresh
+reader sync**. Credentials are transient and are not saved in browser storage.
+
+The refresh atomically republishes identical optimized bytes at the same path
+while temporarily enabling folder watching, verifies the fingerprint using
+read-only KOSync requests, and restores the watching settings from the start of
+that refresh. It only touches already indexed, uniquely matched EPUBs whose
+bytes still match the optimization result. It does not edit EPUB content or
+metadata, write the Grimmory database directly, or push or migrate reading
+progress. A changed EPUB layout can still change the exact location represented
+by an older XPointer. If temporary watching recovery is needed, use **Restore
+watching settings** before other library writes; reconnect to the same instance
+after restart. The original optimization pause remains until you explicitly
+resume watching.
+
 The Grimmory tab is for manually rerunning selected libraries after optimizer
 improvements. It never starts a library job automatically or resumes one after
 an application restart. No Docker socket or access to Grimmory's containers is

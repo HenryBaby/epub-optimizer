@@ -111,6 +111,10 @@
             <div id="grimmory-watcher-maintenance" role="status" aria-live="polite"></div>
             <button id="grimmory-resume-watching" type="button" class="button secondary" disabled>Resume watching</button>
           </aside>
+          <aside id="grimmory-sync-recovery" class="grimmory-watching watching-pending" hidden aria-label="Reader sync watching recovery">
+            <div id="grimmory-sync-recovery-message" role="alert"></div>
+            <button id="grimmory-restore-sync-watching" type="button" class="button secondary" disabled>Restore watching settings</button>
+          </aside>
           <section id="grimmory-folder-step" class="grimmory-stage" hidden aria-labelledby="grimmory-folders-heading">
           <div class="stage-heading"><h3 id="grimmory-folders-heading">Choose your folders</h3><span id="grimmory-selection-count" class="notice">0 selected</span></div>
           <div id="grimmory-mappings" class="results-list"><p class="notice">Connect to discover library folders.</p></div>
@@ -139,6 +143,18 @@
           </div>
           <section id="grimmory-progress" class="grimmory-stage" aria-live="polite" hidden></section>
           <div id="grimmory-review-actions" class="grimmory-actions" hidden><button id="grimmory-new-run" type="button" class="button secondary">Choose folders for another run</button></div>
+          <details id="grimmory-reader-sync" class="grimmory-help grimmory-reader-sync" hidden>
+            <summary>Reader sync</summary>
+            <p id="grimmory-sync-source" class="notice"></p>
+            <p>Refresh Grimmory's fingerprint for optimized books using identical file bytes and temporary folder watching. KOSync is read only; no reading progress is sent.</p>
+            <form id="grimmory-sync-form" autocomplete="off">
+              <label class="field-row">KOReader/KOSync username<input id="grimmory-kosync-username" type="text" autocomplete="off" required></label>
+              <label class="field-row">KOReader/KOSync password<input id="grimmory-kosync-password" type="password" autocomplete="off" required></label>
+              <p class="notice">Use the same sync credentials as CrossPoint, separate from your Grimmory application login. Credentials are used only for this request.</p>
+              <label class="filename-option grimmory-maintenance"><input id="grimmory-sync-maintenance" type="checkbox"><span>Other library writers are paused; allow temporary watching for this refresh.</span></label>
+              <button id="grimmory-refresh-sync" type="submit" disabled>Refresh reader sync</button>
+            </form>
+          </details>
           <details id="grimmory-past-activity" class="grimmory-past">
           <summary>Past activity &amp; backups <span id="grimmory-activity-count" class="notice"></span></summary>
           <h3>Runs</h3>

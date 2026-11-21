@@ -1,5 +1,36 @@
 # Grimmory library maintenance
 
+## Optional reader sync refresh
+
+An optimized EPUB can retain the same rounded kilobyte size while its bytes
+change. Grimmory's normal rescan can then retain a stale reader-sync fingerprint.
+After optimization, open **Reader sync** to explicitly refresh the latest saved
+optimization run's successful EPUBs, including an existing saved run. Failed
+optimization results are excluded; unchanged-byte guards reject later external
+edits. Only already indexed, uniquely matched EPUB paths are eligible, avoiding
+new imports.
+
+Use the **KOReader/KOSync** username and password used for CrossPoint sync, not
+the Grimmory application login. Confirm that other library writers are paused,
+then click **Refresh reader sync**. Credentials are used transiently and are not
+saved in browser storage. Loading, polling, reconnecting and finishing an
+optimization never start a refresh.
+
+The operation republishes identical optimized bytes atomically at the same path
+while temporarily enabling watching. Read-only KOSync GET requests verify the
+fingerprint. It makes no EPUB content or metadata changes, direct database edits,
+server patches or reading-progress pushes/migrations. Existing progress may map
+to a different exact location when optimization changed the HTML layout; this
+does not guarantee that an older XPointer still identifies the same passage.
+
+Watching is restored to its exact state at refresh start. A durable temporary
+watching receipt remains visible if cleanup fails or the process restarts.
+Reconnect to that same Grimmory instance and explicitly select **Restore watching
+settings**; this blocks further library writes until resolved. No recovery action
+runs automatically after restart. This receipt is separate from the optimization
+pause receipt: a refresh started while paused leaves watching paused, and
+**Resume watching** remains a separate action after successful verification.
+
 Contract for the manually invoked library workflow. Tests use temporary library
 trees and mocked Grimmory responses; a live deployment still requires explicit
 mount configuration and connection testing.

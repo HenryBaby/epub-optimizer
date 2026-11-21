@@ -17,7 +17,7 @@ import threading
 import time
 import uuid
 from contextlib import contextmanager, nullcontext
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -67,6 +67,62 @@ def _filesystem_step(stage, operation):
 def _digest(path):
     with path.open("rb") as stream:
         return hashlib.file_digest(stream, "sha256").hexdigest()
+
+
+def _partial_md5(path):
+    """KOReader's document identity (not a whole-file digest)."""
+    digest = hashlib.md5(usedforsecurity=False)
+    with path.open("rb") as stream:
+        for offset in [0, *(1024 << (2 * i) for i in range(11))]:
+            stream.seek(offset)
+            block = stream.read(1024)
+            if not block:
+                break
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _kosync_get(base_url, route, username, password):
+    """Native KOSync is strictly read-only; never use the administrator Bearer token."""
+    request = Request(
+        base_url + "/api/koreader/" + route,
+        headers={
+            "Accept": "application/json",
+            "x-auth-user": username,
+            "x-auth-key": hashlib.md5(password.encode(), usedforsecurity=False).hexdigest(),
+        },
+        method="GET",
+    )
+    try:
+        with build_opener(_NoRedirect).open(request, timeout=10) as response:
+            body = response.read(65537)
+            code = response.status
+    except HTTPError as exc:
+        if exc.code != 404 or not route.startswith("syncs/progress/"):
+            raise GrimmoryValidationError("KOSync authentication or request failed.") from None
+        code, body = 404, exc.read(65537)
+    except Exception:
+        raise GrimmoryValidationError("KOSync request failed; check access and retry.") from None
+    try:
+        if len(body) > 65536:
+            raise ValueError
+        value = json.loads(body)
+        if not isinstance(value, dict):
+            raise ValueError
+        if route == "users/auth":
+            if code != 200 or value.get("username") != username:
+                raise ValueError
+            return True
+        document = route.rsplit("/", 1)[-1]
+        if code == 200 and value.get("document") == document:
+            return True
+        if code == 404 and value.get("message") == "No progress found for user and book":
+            return True
+        if code == 404 and value.get("message") == f"Book not found for hash {document}":
+            return False
+    except (ValueError, TypeError):
+        pass
+    raise GrimmoryValidationError("Unexpected KOSync response; indexing was not verified.")
 
 
 def _overlap(a, b):
@@ -332,6 +388,15 @@ class GrimmoryManager:
         value["history"] = value["jobs"]
         value["snapshots"] = list(value["snapshots"].values())
         value["plans"] = list(value["plans"].values())
+        value["sync_watching_recovery"] = next(
+            (
+                copy.deepcopy(j["watching_recovery"])
+                for j in reversed(self._state["jobs"])
+                if j.get("watching_recovery", {}).get("status") != "restored"
+                and j.get("watching_recovery")
+            ),
+            None,
+        )
         return value
 
     def _failure_message(self, exc, fallback):
@@ -342,14 +407,24 @@ class GrimmoryManager:
             return message.replace(self._token, "[redacted]") if self._token else message
         return fallback
 
-    def _idle(self):
+    def _idle(self, *, recovery=False):
         if self._task and not self._task.done():
             raise GrimmoryConflictError("A library operation is already running.")
+        if not recovery and any(
+            j.get("watching_recovery") and j["watching_recovery"].get("status") != "restored"
+            for j in self._state["jobs"]
+        ):
+            raise GrimmoryConflictError("Restore temporary sync watching settings first.")
 
     async def connect(self, payload):
         async with self._lock:
-            self._idle()
+            self._idle(recovery=True)
             url = str(payload.get("base_url", "")).rstrip("/")
+            recovery = self.status().get("sync_watching_recovery")
+            if recovery and url != recovery["base_url"]:
+                raise GrimmoryConflictError(
+                    "Reconnect to the saved Grimmory instance for recovery."
+                )
             parsed = urlsplit(url)
             if (
                 parsed.scheme not in {"http", "https"}
@@ -626,7 +701,7 @@ class GrimmoryManager:
         )
         self._save()
 
-    def _mappings(self, mappings):
+    def _mappings(self, mappings, *, require_paused=True):
         if not self.allowed_roots or not mappings:
             raise GrimmoryValidationError(
                 "Configure allowed library roots and select mappings first."
@@ -662,7 +737,7 @@ class GrimmoryManager:
                 p["path"] for p in library["paths"]
             ]:
                 raise GrimmoryValidationError("Mapping does not match a discovered library path.")
-            if library["watch"]:
+            if require_paused and library["watch"]:
                 raise GrimmoryValidationError("Pause Grimmory watching before library maintenance.")
             root = _safe(Path(mapping.get("local_path", "")))
             if not any(root == _safe(p) or _safe(p) in root.parents for p in self.allowed_roots):
@@ -1005,6 +1080,416 @@ class GrimmoryManager:
                 self._save()
             finally:
                 self._release_process_lock()
+
+    @staticmethod
+    def _remote_path(root, relative):
+        if not isinstance(root, str) or not isinstance(relative, str):
+            raise GrimmoryValidationError("Invalid indexed file path.")
+        base, child = PurePosixPath(root), PurePosixPath(relative)
+        if (
+            not base.is_absolute()
+            or root.startswith("//")
+            or child.is_absolute()
+            or not relative
+            or any(x in {".", "..", ""} for x in relative.split("/"))
+            or ".." in base.parts
+            or "\\" in root + relative
+            or str(base) != (root.rstrip("/") or "/")
+        ):
+            raise GrimmoryValidationError("Invalid indexed file path.")
+        return str(base / child)
+
+    def _indexed_book(self, mapping, name):
+        """Match one existing BookFile; a watcher event must never import a new book."""
+        expected = self._remote_path(mapping["remote_path"], name)
+        # v3.5 BookMapper serializes Book.libraryPath as {id}, not a path DTO.
+        settings = self._watch_read(mapping["library_id"])
+        paths = {p.get("id"): p["path"] for p in settings["paths"]}
+        books = _request_json(
+            self._state["base_url"] + f"/api/v1/libraries/{mapping['library_id']}/book",
+            None,
+            self._token,
+        )
+        if not isinstance(books, list):
+            raise GrimmoryValidationError("Unexpected indexed books response.")
+        matches = []
+        for book in books:
+            if not isinstance(book, dict) or str(book.get("libraryId")) != str(
+                mapping["library_id"]
+            ):
+                continue
+            library_path = book.get("libraryPath")
+            if (
+                not isinstance(library_path, dict)
+                or type(library_path.get("id")) is not int
+                or paths.get(library_path["id"]) != mapping["remote_path"]
+            ):
+                continue
+            files = [book.get("primaryFile"), *(book.get("alternativeFormats") or [])]
+            for file in files:
+                if not isinstance(file, dict) or file.get("book") is not True:
+                    continue
+                if str(file.get("bookType", "")).upper() != "EPUB":
+                    continue
+                try:
+                    sub = file.get("fileSubPath") or ""
+                    name_part = file.get("fileName")
+                    if (
+                        not isinstance(sub, str)
+                        or not isinstance(name_part, str)
+                        or "/" in name_part
+                    ):
+                        continue
+                    remote = self._remote_path(
+                        paths[library_path["id"]], (sub + "/" if sub else "") + name_part
+                    )
+                except GrimmoryValidationError:
+                    continue
+                if remote != expected:
+                    continue
+                if (
+                    type(book.get("id")) is not int
+                    or type(file.get("id")) is not int
+                    or file.get("bookId") != book["id"]
+                    or file.get("filePath") != expected
+                ):
+                    raise GrimmoryValidationError("Malformed indexed book identity.")
+                matches.append((book["id"], file["id"]))
+        if len(matches) != 1:
+            raise GrimmoryValidationError(
+                "File is missing or ambiguous in Grimmory; refresh skipped."
+            )
+        return matches[0]
+
+    def _sync_file(self, mapping, result):
+        name = result["path"]
+        self._remote_path(mapping["remote_path"], name)
+        root = _safe(mapping["local_path"])
+        path = _safe(root / name)
+        if root not in path.parents:
+            raise GrimmoryValidationError("File is outside the selected library.")
+        info = path.lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise GrimmoryValidationError("Sync refresh requires an ordinary non-hardlinked file.")
+        try:
+            if _digest(path) != result["after_sha256"]:
+                raise GrimmoryValidationError("Optimized file changed; sync refresh refused.")
+            document = _partial_md5(path)
+        finally:
+            latest = path.lstat()
+            if (latest.st_dev, latest.st_ino, latest.st_mtime_ns, latest.st_size) == (
+                info.st_dev,
+                info.st_ino,
+                info.st_mtime_ns,
+                info.st_size,
+            ):
+                os.utime(path, ns=(info.st_atime_ns, info.st_mtime_ns))
+        if (latest.st_dev, latest.st_ino, latest.st_mtime_ns, latest.st_size) != (
+            info.st_dev,
+            info.st_ino,
+            info.st_mtime_ns,
+            info.st_size,
+        ):
+            raise GrimmoryValidationError("File changed while verifying its fingerprint.")
+        return path, document
+
+    async def refresh_sync(self, payload):
+        async with self._lock:
+            self._confirm(payload)
+            if not self._connected or not self._token:
+                raise GrimmoryValidationError("Reconnect Grimmory before sync refresh.")
+            username, password = payload.get("kosync_username"), payload.get("kosync_password")
+            if (
+                not isinstance(username, str)
+                or not username
+                or not isinstance(password, str)
+                or not password
+            ):
+                raise GrimmoryValidationError("Provide KOSync credentials for this refresh.")
+            source = next(
+                (j for j in self._state["jobs"] if j["id"] == payload.get("job_id")), None
+            )
+            if (
+                not source
+                or source.get("kind") != "optimize"
+                or source.get("status") not in {"completed", "cancelled", "failed", "interrupted"}
+            ):
+                raise GrimmoryValidationError("Select a finished optimization job.")
+            snapshot = self._state["snapshots"].get(source.get("snapshot_id"))
+            plan = snapshot.get("plan") if snapshot else None
+            if not plan or plan["base_url"] != self._state["base_url"]:
+                raise GrimmoryValidationError("Reconnect to the optimization's Grimmory instance.")
+            results = [
+                copy.deepcopy(r)
+                for r in source["results"]
+                if r.get("status") == "optimized" and r.get("after_sha256")
+            ]
+            if not results:
+                raise GrimmoryValidationError("This job has no optimized files to refresh.")
+            self._acquire_process_lock()
+            job = dict(
+                id=uuid.uuid4().hex,
+                kind="sync_refresh",
+                source_job_id=source["id"],
+                snapshot_id=source["snapshot_id"],
+                base_url=plan["base_url"],
+                status="running",
+                phase="refreshing_sync",
+                results=[],
+                created_at=time.time(),
+            )
+            self._state["jobs"].append(job)
+            self._cancel.clear()
+            try:
+                self._save()
+                self._task = asyncio.create_task(
+                    asyncio.to_thread(
+                        self._run_sync_refresh,
+                        copy.deepcopy(plan),
+                        results,
+                        job,
+                        username,
+                        password,
+                    )
+                )
+            except Exception:
+                self._release_process_lock()
+                raise
+            return copy.deepcopy(job)
+
+    def _restore_sync_states(self, job):
+        receipt = job.get("watching_recovery")
+        if not receipt:
+            return True
+        receipt["status"] = "pending"
+        self._save()
+        for item in receipt["libraries"]:
+            try:
+                body = self._watch_read(item["library_id"])
+                if body["paths"] != item["paths"]:
+                    raise GrimmoryValidationError(
+                        "Library paths changed; watcher recovery refused."
+                    )
+                if body["watch"] != item["original_watch"]:
+                    self._watch_update(item, body, item["original_watch"])
+                item["status"] = "restored"
+                item.pop("error", None)
+                for library in self._state["libraries"]:
+                    if library["id"] == item["library_id"]:
+                        library["watch"] = item["original_watch"]
+            except Exception:
+                item["status"] = "restore_failed"
+                item["error"] = (
+                    "Temporary watching restoration failed; reconnect and restore explicitly."
+                )
+            self._save()
+        complete = all(i["status"] == "restored" for i in receipt["libraries"])
+        receipt["status"] = "restored" if complete else "pending"
+        self._save()
+        return complete
+
+    async def restore_sync_watching(self, payload):
+        async with self._lock:
+            self._idle(recovery=True)
+            job = next(
+                (
+                    j
+                    for j in reversed(self._state["jobs"])
+                    if j.get("watching_recovery")
+                    and j["watching_recovery"].get("status") != "restored"
+                ),
+                None,
+            )
+            if not job or job["id"] != payload.get("job_id"):
+                raise GrimmoryValidationError(
+                    "Select the current unresolved sync refresh recovery job."
+                )
+            if not self._connected or job["base_url"] != self._state["base_url"]:
+                raise GrimmoryValidationError("Reconnect to the saved Grimmory instance first.")
+            self._acquire_process_lock()
+            worker = asyncio.create_task(asyncio.to_thread(self._restore_sync_states, job))
+            try:
+                try:
+                    await asyncio.shield(worker)
+                except asyncio.CancelledError:
+                    while not worker.done():
+                        try:
+                            await asyncio.shield(worker)
+                        except asyncio.CancelledError:
+                            continue
+                    raise
+            finally:
+                self._release_process_lock()
+            return self.status()
+
+    def _run_sync_refresh(self, plan, sources, job, username, password):
+        try:
+            _kosync_get(job["base_url"], "users/auth", username, password)
+            self._refresh()
+            self._mappings(plan["mappings"], require_paused=False)
+            pending = []
+            # Complete all read-only preflight before any library PUT or publication.
+            for source in sources:
+                result = {k: source[k] for k in ("root_index", "path", "after_sha256")}
+                result["status"] = "skipped"
+                job["results"].append(result)
+                try:
+                    mapping = plan["mappings"][result["root_index"]]
+                    path, document = self._sync_file(mapping, result)
+                    identity = self._indexed_book(mapping, result["path"])
+                    result.update(book_id=identity[0], book_file_id=identity[1], document=document)
+                    if _kosync_get(
+                        job["base_url"], "syncs/progress/" + document, username, password
+                    ):
+                        self._sync_file(mapping, result)
+                        if self._indexed_book(mapping, result["path"]) != identity:
+                            raise GrimmoryValidationError("Indexed book identity changed.")
+                        result["status"] = "verified"
+                    else:
+                        result["status"] = "pending"
+                        pending.append((mapping, result))
+                except GrimmoryValidationError as exc:
+                    result["message"] = str(exc)
+                self._save()
+            if pending and not self._cancel.is_set():
+                items = []
+                for library_id in dict.fromkeys(m["library_id"] for m, _ in pending):
+                    body = self._watch_read(library_id)
+                    items.append(
+                        dict(
+                            library_id=library_id,
+                            original_watch=body["watch"],
+                            paths=body["paths"],
+                            status="captured",
+                        )
+                    )
+                job["watching_recovery"] = dict(
+                    job_id=job["id"], base_url=job["base_url"], status="pending", libraries=items
+                )
+                self._save()
+                for item in items:
+                    body = self._watch_read(item["library_id"])
+                    if body["paths"] != item["paths"] or body["watch"] != item["original_watch"]:
+                        raise GrimmoryValidationError(
+                            "Library settings changed before sync refresh."
+                        )
+                    if not body["watch"]:
+                        self._watch_update(item, body, True)
+                    item["status"] = "enabled"
+                    self._save()
+                deadline = time.monotonic() + self.SYNC_REFRESH_TIMEOUT
+                while pending and not self._cancel.is_set():
+                    for mapping, result in list(pending):
+                        if self._cancel.is_set():
+                            break
+                        try:
+                            path, document = self._sync_file(mapping, result)
+                            identity = (result["book_id"], result["book_file_id"])
+                            if self._indexed_book(mapping, result["path"]) != identity:
+                                raise GrimmoryValidationError(
+                                    "Indexed book identity changed; refresh refused."
+                                )
+                            if not _kosync_get(
+                                job["base_url"], "syncs/progress/" + document, username, password
+                            ):
+                                metadata = _metadata(path)
+                                file_info = path.stat()
+                                parent_info = path.parent.stat()
+                                result["status"] = "pending"
+                                try:
+                                    self._replace(
+                                        path,
+                                        path,
+                                        metadata,
+                                        result["after_sha256"],
+                                        result["after_sha256"],
+                                        result,
+                                    )
+                                finally:
+                                    latest = _safe(path).stat()
+                                    file_identity = [latest.st_dev, latest.st_ino]
+                                    if (
+                                        file_identity
+                                        in (
+                                            [file_info.st_dev, file_info.st_ino],
+                                            result.get("temp_identity"),
+                                        )
+                                        and _metadata(path) == metadata
+                                    ):
+                                        os.utime(
+                                            path, ns=(file_info.st_atime_ns, metadata["mtime_ns"])
+                                        )
+                                    parent_latest = path.parent.stat()
+                                    if (parent_latest.st_dev, parent_latest.st_ino) == (
+                                        parent_info.st_dev,
+                                        parent_info.st_ino,
+                                    ):
+                                        os.utime(
+                                            path.parent,
+                                            ns=(parent_info.st_atime_ns, parent_info.st_mtime_ns),
+                                        )
+                                result["publications"] = result.get("publications", 0) + 1
+                                _, after_document = self._sync_file(mapping, result)
+                                if after_document != document:
+                                    raise GrimmoryValidationError(
+                                        "Document fingerprint changed during refresh."
+                                    )
+                            if self._indexed_book(mapping, result["path"]) != identity:
+                                raise GrimmoryValidationError(
+                                    "Indexed book identity changed during refresh."
+                                )
+                            if _kosync_get(
+                                job["base_url"], "syncs/progress/" + document, username, password
+                            ):
+                                self._sync_file(mapping, result)
+                                result["status"] = "verified"
+                                pending.remove((mapping, result))
+                        except Exception:
+                            result["status"] = "failed"
+                            result["message"] = (
+                                "Sync refresh stopped: file, index or KOSync safety check failed."
+                            )
+                            pending.remove((mapping, result))
+                        self._save()
+                    if time.monotonic() >= deadline:
+                        break
+                    if pending:
+                        self._cancel.wait(self.SYNC_REFRESH_INTERVAL)
+            for result in job["results"]:
+                if result["status"] == "pending":
+                    result["status"] = "failed"
+                    result["message"] = "Refresh cancelled or indexing acknowledgement timed out."
+            job["status"] = (
+                "cancelled"
+                if self._cancel.is_set()
+                else (
+                    "completed"
+                    if all(r["status"] == "verified" for r in job["results"])
+                    else "failed"
+                )
+            )
+        except Exception:
+            job["status"] = "failed"
+            job["message"] = "Sync refresh failed; check credentials, connection and file safety."
+        finally:
+            try:
+                for result in job["results"]:
+                    if result["status"] == "pending":
+                        result["status"] = "failed"
+                        result["message"] = "Sync refresh did not finish verification."
+                if not self._restore_sync_states(job):
+                    job["status"] = "failed"
+                    job["message"] = (
+                        "Temporary watching restoration is incomplete; explicit recovery required."
+                    )
+                job["phase"] = "finished"
+                job["finished_at"] = time.time()
+                self._save()
+            finally:
+                self._release_process_lock()
+
+    SYNC_REFRESH_TIMEOUT = 60
+    SYNC_REFRESH_INTERVAL = 5
 
     async def restore(self, payload):
         async with self._lock:

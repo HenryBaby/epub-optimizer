@@ -43,7 +43,7 @@ function fixture() {
   return {
     state: { connected: false, base_url: null, libraries: [], mappings: [], active_job: null,
       job: null, history: [], snapshots: [], watcher_maintenance: null },
-    posts: [], reads: 0, unexpected: [], partial: false, failStatus: false,
+    posts: [], reads: 0, unexpected: [], partial: false, failStatus: false, syncAuthError: false,
     receipt(partial = false) {
       return { session_id: 'watch-session-1', base_url: 'http://grimmory.test:6060',
         status: partial ? 'partial' : 'paused', libraries: [
@@ -97,6 +97,19 @@ function fixture() {
           this.state.job = { id: 'restore-1', status: 'restoring', results: [] };
           this.state.active_job = 'restore-1';
           break;
+        case 'refresh-sync':
+          assert.deepEqual(payload, { job_id: 'run-1', kosync_username: 'fixture-sync',
+            kosync_password: 'fixture-sync-password', maintenance_confirmed: true });
+          this.state.job = { id: 'sync-2', kind: 'sync_refresh', source_job_id: 'run-1', status: 'running',
+            phase: 'refreshing_sync', results: [] };
+          this.state.active_job = 'sync-2';
+          this.state.sync_watching_recovery = { job_id: 'sync-2', base_url: this.state.base_url,
+            status: 'pending', libraries: [{ library_id: 1, name: 'Fiction', original_watch: false }] };
+          break;
+        case 'restore-sync-watching':
+          assert.deepEqual(payload, { job_id: 'sync-2' });
+          this.state.sync_watching_recovery = null;
+          break;
         default: throw new Error(`Unexpected action: ${action}`);
       }
       return this.state;
@@ -115,6 +128,8 @@ async function setup(browser, mock, options = {}) {
       // Chromium logs the intentionally injected HTTP failure as a resource error.
       if (mock.failStatus && message.location().url === `${origin}/grimmory` &&
           /Failed to load resource.*503/.test(message.text())) return;
+      if (mock.syncAuthError && message.location().url === `${origin}/grimmory/refresh-sync` &&
+          /Failed to load resource.*401/.test(message.text())) return;
       errors.push(message.text());
     });
   });
@@ -142,6 +157,11 @@ async function setup(browser, mock, options = {}) {
       return json(mock.state);
     }
     if (req.method() === 'POST' && url.pathname.startsWith('/grimmory/')) {
+      if (mock.syncAuthError && url.pathname.endsWith('/refresh-sync')) {
+        mock.posts.push({ action: 'refresh-sync', payload: req.postDataJSON() });
+        return route.fulfill({ status: 401, contentType: 'application/json',
+          body: JSON.stringify({ detail: 'KOSync authentication failed. Check reader sync credentials.' }) });
+      }
       try { return await json(mock.action(url.pathname.split('/').at(-1), req.postDataJSON())); }
       catch (error) {
         errors.push(error.stack);
@@ -195,6 +215,21 @@ async function finish(session) {
 }
 
 const passed = [];
+function syncFixture() {
+  const mock = fixture();
+  const source = { ...clone(completed), kind: 'optimize', snapshot_id: 'backup-1' };
+  const previousSync = { id: 'sync-1', kind: 'sync_refresh', source_job_id: 'run-1',
+    status: 'completed', phase: 'finished', created_at: 1730000010, results: [{ status: 'verified' }] };
+  Object.assign(mock.state, { connected: true, base_url: 'http://grimmory.test:6060', libraries: clone(libraries),
+    job: previousSync, history: [source, previousSync], snapshots: [clone(snapshot)], watcher_maintenance: mock.receipt() });
+  return mock;
+}
+async function fillSync(page) {
+  const disclosure = page.locator('#grimmory-reader-sync');
+  if (!(await disclosure.evaluate(node => node.open))) await disclosure.locator('summary').click();
+  await page.getByLabel('KOReader/KOSync username', { exact: true }).fill('fixture-sync');
+  await page.getByLabel('KOReader/KOSync password', { exact: true }).fill('fixture-sync-password');
+}
 async function check(name, task) {
   await task();
   passed.push(name);
@@ -204,6 +239,83 @@ async function check(name, task) {
 (async () => {
   const browser = await chromium.launch({ headless: true });
   try {
+    await check('reader sync is explicit, uses optimization source, clears credentials and reports verification', async () => {
+      const mock = syncFixture();
+      const s = await setup(browser, mock);
+      const { page } = s;
+      await page.reload();
+      await page.locator('[data-tab="automation"]').click();
+      await page.locator('[data-tab="grimmory"]').click();
+      await page.locator('#grimmory-refresh').click();
+      assert.equal(mock.posts.length, 0, 'Loading, tabs and status never refresh reader sync');
+      await fillSync(page);
+      assert(await page.locator('#grimmory-refresh-sync').isDisabled(), 'Fresh writer acknowledgement required');
+      await page.locator('#grimmory-sync-maintenance').check();
+      await page.locator('#grimmory-refresh-sync').click();
+      await text(page, '#grimmory-progress', /Updating reader sync/);
+      assert.equal(mock.posts.length, 1);
+      assert.equal(await page.locator('#grimmory-kosync-password').inputValue(), '');
+      assert(await page.locator('#grimmory-cancel').isEnabled());
+      assert(await page.locator('#grimmory-resume-watching').isDisabled());
+      assert(await page.locator('#grimmory-restore-sync-watching').isDisabled());
+      await text(page, '#grimmory-sync-recovery-message', /temporarily enables watching/);
+      const reads = mock.reads;
+      await page.waitForFunction(() => document.querySelector('#grimmory-progress').textContent.includes('0 verified'));
+      await page.waitForTimeout(1700);
+      assert(mock.reads > reads, 'Active refresh polls');
+      assert.equal(mock.posts.length, 1, 'Polling does not submit another action');
+      assert.equal(await page.evaluate(() => JSON.stringify([Object.entries(localStorage), Object.entries(sessionStorage)]).includes('fixture-sync')), false);
+      mock.state.job = { ...mock.state.job, status: 'completed', phase: 'finished', results: [
+        { path: 'One.epub', status: 'verified' }, { path: 'Two.epub', status: 'skipped' },
+        { path: 'Three.epub', status: 'failed', message: 'Fingerprint not yet visible.' }] };
+      mock.state.active_job = null;
+      mock.state.sync_watching_recovery = null;
+      await page.locator('#grimmory-refresh').click();
+      await text(page, '#grimmory-progress', /1 verified · 1 skipped · 1 failed/);
+      assert(!((await page.locator('#grimmory-progress').textContent()).includes('0 completed')));
+      assert.equal(mock.state.watcher_maintenance.status, 'paused');
+      assert(await page.locator('#grimmory-resume-watching').isEnabled());
+      await page.screenshot({ path: path.join(artifacts, 'reader-sync.png'), fullPage: true });
+      await finish(s);
+    });
+    await check('interrupted sync watching recovery survives reload and requires explicit same-instance restore', async () => {
+      const mock = syncFixture();
+      mock.state.job = { id: 'sync-2', kind: 'sync_refresh', phase: 'finished', status: 'interrupted', results: [] };
+      mock.state.sync_watching_recovery = { job_id: 'sync-2', base_url: 'http://grimmory.test:6060', status: 'pending',
+        libraries: [{ library_id: 1, original_watch: false }, { library_id: 2, original_watch: true }] };
+      mock.state.connected = false;
+      const s = await setup(browser, mock);
+      await s.page.reload();
+      await s.page.locator('[data-tab="grimmory"]').click();
+      await text(s.page, '#grimmory-sync-recovery-message', /Reconnect to/);
+      assert(await s.page.locator('#grimmory-sync-recovery').isVisible());
+      assert(await s.page.locator('#grimmory-restore-sync-watching').isDisabled());
+      assert.equal(mock.posts.length, 0);
+      await connect(s.page);
+      assert.equal(mock.posts.length, 1, 'Reconnect never restores automatically');
+      assert(await s.page.locator('#grimmory-resume-watching').isDisabled());
+      await fillSync(s.page);
+      await s.page.locator('#grimmory-sync-maintenance').check();
+      assert(await s.page.locator('#grimmory-refresh-sync').isDisabled());
+      await s.page.locator('#grimmory-restore-sync-watching').click();
+      await s.page.locator('#grimmory-sync-recovery').waitFor({ state: 'hidden' });
+      assert.deepEqual(mock.posts.map(post => post.action), ['connect', 'restore-sync-watching']);
+      assert.equal(mock.state.watcher_maintenance.status, 'paused', 'Optimization pause receipt retained');
+      await finish(s);
+    });
+    await check('reader sync authentication failure is visible and never retries automatically', async () => {
+      const mock = syncFixture(); mock.syncAuthError = true;
+      const s = await setup(browser, mock);
+      await fillSync(s.page);
+      await s.page.locator('#grimmory-sync-maintenance').check();
+      await s.page.locator('#grimmory-refresh-sync').click();
+      await text(s.page, '#grimmory-message', /KOSync authentication failed/);
+      assert(await s.page.locator('#grimmory-message').isVisible());
+      assert.equal(await s.page.locator('#grimmory-kosync-password').inputValue(), '');
+      await s.page.locator('#grimmory-refresh').click();
+      assert.equal(mock.posts.length, 1);
+      await finish(s);
+    });
     await check('manual maintenance workflow, preserved drafts, polling, history, scoped restore and explicit resume', async () => {
       const mock = fixture();
       const s = await setup(browser, mock);

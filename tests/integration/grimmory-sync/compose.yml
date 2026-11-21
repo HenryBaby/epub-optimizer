@@ -1,0 +1,56 @@
+services:
+  db:
+    image: mariadb:11.4@sha256:a8992b5e5404d11e03c54a31d0c1bdea3fd116d283aa6d1a627551f29045309b
+    cpus: 1
+    mem_limit: 1g
+    environment:
+      MARIADB_DATABASE: integration
+      MARIADB_USER: integration
+      MARIADB_PASSWORD: ${TEST_DB_PASSWORD:?run via run.sh}
+      MARIADB_ROOT_PASSWORD: ${TEST_DB_PASSWORD:?run via run.sh}
+    volumes:
+      - database:/var/lib/mysql
+    healthcheck:
+      test: [CMD, healthcheck.sh, --connect, --innodb_initialized]
+      interval: 3s
+      timeout: 3s
+      retries: 60
+  grimmory:
+    image: ghcr.io/grimmory-tools/grimmory:v3.5.0@sha256:bf6fe21c6e247597f7869664a440b5a34242e2d2940575cae39c17bfaa66dc0b
+    cpus: 3
+    mem_limit: 5g
+    environment:
+      USER_ID: 1000
+      GROUP_ID: 1000
+      TZ: Etc/UTC
+      DATABASE_URL: jdbc:mariadb://db:3306/integration
+      DATABASE_USERNAME: integration
+      DATABASE_PASSWORD: ${TEST_DB_PASSWORD:?run via run.sh}
+      JDK_JAVA_OPTIONS: -Xmx3g -XX:ActiveProcessorCount=3
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ${TEST_ROOT:?run via run.sh}/books:/books
+      - application:/app/data
+  runner:
+    image: ${TEST_RUNNER_IMAGE:-epub-optimizer-dev:local}
+    cpus: 2
+    mem_limit: 3g
+    user: "1000:1000"
+    working_dir: /app
+    environment:
+      PYTHONPATH: /app/src
+      PYTHONDONTWRITEBYTECODE: 1
+      TEST_ADMIN_PASSWORD: ${TEST_ADMIN_PASSWORD:?run via run.sh}
+      TEST_KOSYNC_PASSWORD: ${TEST_KOSYNC_PASSWORD:?run via run.sh}
+      GRIMMORY_URL: http://grimmory:6060
+    volumes:
+      - ${TEST_REPO:?run via run.sh}:/app:ro
+      - ${TEST_ROOT:?run via run.sh}/books:/books
+      - ${TEST_ROOT:?run via run.sh}/backups:/backups
+      - ${TEST_ROOT:?run via run.sh}/state:/state
+    command: [python, tests/integration/grimmory-sync/runner.py, verify]
+volumes:
+  database:
+  application:

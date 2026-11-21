@@ -1522,3 +1522,8 @@ dd {
 @media (prefers-reduced-motion: reduce) {
   .grimmory-panel *, .grimmory-panel *::before { animation: none !important; transition: none !important; }
 }
+/* Reader sync remains optional; temporary watching recovery stays outside it. */
+.grimmory-reader-sync form { display: grid; gap: 0.85rem; margin-top: 1rem; }
+.grimmory-reader-sync .field-row input { min-width: 0; width: 100%; }
+.grimmory-reader-sync form > button { justify-self: start; }
+#grimmory-sync-recovery { overflow-wrap: anywhere; }
